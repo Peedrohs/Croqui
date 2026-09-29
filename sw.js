@@ -1,9 +1,10 @@
 // Service worker: cache-first de todo o app → funciona 100% offline depois da 1ª visita.
-const VERSION = 'croqui-v1';
+const VERSION = 'croqui-v2';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/db.js', 'js/editor.js', 'js/export.js', 'js/freehand.js', 'js/geometry.js',
   'js/model.js', 'js/render.js', 'js/solver.js', 'js/textures.js', 'js/ui.js', 'js/units.js', 'js/util.js',
+  'js/motion.js', 'js/fan.js', 'js/markup.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 

@@ -12,9 +12,15 @@ import { buildFills, buildGrid, buildOverlay, buildThumb } from './render.js';
 import { TEXTURES, PAVER_PATTERNS, PAVER_COLORS, DECK_COLORS, previewSVG, defaultFill, textureName } from './textures.js';
 import { exportPNG, exportPDF, safeName } from './export.js';
 import { toast, confirmDialog, menu, saveFile, ask } from './ui.js';
+import { onFastTap } from './motion.js';
+import { RadialMenu } from './fan.js';
+import { ensureMarkup, markupSVG, strokeSVG, strokeHit, markupPoints, MARK_COLORS, MARK_WIDTHS } from './markup.js';
+
+const MARK_TOOLS = ['pen', 'arrow', 'eraser'];
 
 const SETTINGS_KEY = 'croqui-settings';
-const loadSettings = () => { try { return { pencilOnly: false, penSeen: false, library: false, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { pencilOnly: false, penSeen: false, library: false }; } };
+const DEFAULT_SETTINGS = { pencilOnly: false, penSeen: false, library: false, markColor: '#e0392b', markWidth: 4, fabPos: null };
+const loadSettings = () => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; } catch { return { ...DEFAULT_SETTINGS }; } };
 const saveSettings = (s) => { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ } };
 
 const ICON = {
@@ -31,7 +37,30 @@ const ICON = {
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  pen: '<path d="M4 20l1.5-5L16 4.5a2.1 2.1 0 013 3L8.5 18z"/><path d="M13.5 7l3 3"/><path d="M4 20l4.5-1.5"/>',
+  arrow: '<path d="M5 19L19 5"/><path d="M10 5h9v9"/>',
+  eraser: '<path d="M8 20h12"/><path d="M5.5 14.5l8-8a2 2 0 012.8 0l2.2 2.2a2 2 0 010 2.8L12 18H8.5z"/><path d="M9.5 10.5l5 5"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a10 10 0 005.4-1.6"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/>',
+  measure: '<path d="M3 17L17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>',
+  textures: '<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/>',
 };
+
+// Itens do leque: anel interno = geometria; anel externo = anotação e ações.
+const FAN_ITEMS = [
+  { id: 'select', label: 'Medir', icon: 'measure', ring: 0, kind: 'tool' },
+  { id: 'point', label: 'Pontos', icon: 'point', ring: 0, kind: 'tool' },
+  { id: 'arc', label: 'Arco', icon: 'arc', ring: 0, kind: 'toggle' },
+  { id: 'free', label: 'Mão livre', icon: 'free', ring: 0, kind: 'tool' },
+  { id: 'text', label: 'Texto', icon: 'text', ring: 0, kind: 'tool' },
+  { id: 'pen', label: 'Caneta', icon: 'pen', ring: 1, kind: 'tool' },
+  { id: 'arrow', label: 'Seta', icon: 'arrow', ring: 1, kind: 'tool' },
+  { id: 'eraser', label: 'Borracha', icon: 'eraser', ring: 1, kind: 'tool' },
+  { id: 'library', label: 'Texturas', icon: 'textures', ring: 1, kind: 'toggle' },
+  { id: 'undo', label: 'Desfazer', icon: 'undo', ring: 1, kind: 'action' },
+];
+const TOOL_ICON = { select: 'measure', point: 'point', free: 'free', text: 'text', pen: 'pen', arrow: 'arrow', eraser: 'eraser' };
+const TOOL_LABEL = { select: 'Medir', point: 'Pontos', free: 'Mão livre', text: 'Texto', pen: 'Caneta', arrow: 'Seta', eraser: 'Borracha' };
 const icon = (k) => `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
 
 export class Editor {
@@ -42,6 +71,10 @@ export class Editor {
     this.sketches = sketches;
     this.cb = { onBack, onSwitch, onNewSketch, onRenameSketch, onDeleteSketch, onExportFolder };
     this.content = sketch.content;
+    ensureMarkup(this.content);
+    this.markupDirty = true;
+    this.liveStroke = null;
+    this.eraserPos = null;
     this.settings = loadSettings();
     this.tool = 'point';
     this.arcMode = false;
@@ -75,14 +108,8 @@ export class Editor {
       <header class="topbar">
         <button class="ib" data-a="back" aria-label="Voltar">${icon('back')}</button>
         <button class="title-btn" data-a="sketchMenu"><span class="t-folder">${esc(this.folder.name)}</span><span class="t-sketch">${esc(this.sketch.name)} ▾</span></button>
-        <div class="toolgroup" role="toolbar">
-          <button class="tb" data-tool="select" title="Selecionar (V)">${icon('select')}<span>Selecionar</span></button>
-          <button class="tb" data-tool="point" title="Ponto a ponto (P)">${icon('point')}<span>Pontos</span></button>
-          <button class="tb toggle" data-a="arc" title="Próximo segmento em arco (A)">${icon('arc')}<span>Arco</span></button>
-          <button class="tb" data-tool="free" title="Mão livre (F)">${icon('free')}<span>Mão livre</span></button>
-          <button class="tb" data-tool="text" title="Texto (T)">${icon('text')}<span>Texto</span></button>
-        </div>
         <div class="spacer"></div>
+        <button class="ib" data-a="markupVis" aria-label="Mostrar/ocultar anotações"></button>
         <button class="ib" data-a="undo" aria-label="Desfazer">${icon('undo')}</button>
         <button class="ib" data-a="redo" aria-label="Refazer">${icon('redo')}</button>
         <button class="unit-btn" data-a="unit"></button>
@@ -92,9 +119,10 @@ export class Editor {
       </header>
       <div class="stage">
         <svg class="canvas" xmlns="http://www.w3.org/2000/svg">
-          <g class="grid"></g><g class="fills"></g><g class="overlay"></g>
+          <g class="grid"></g><g class="fills"></g><g class="overlay"></g><g class="markup"></g><g class="markup-live"></g>
         </svg>
         <div class="drawbar hidden"></div>
+        <div class="markbar hidden"></div>
         <aside class="inspector hidden"></aside>
         <aside class="library ${this.settings.library ? 'open' : ''}">
           <div class="lib-head"><b>Texturas</b><span>Arraste para dentro de uma área</span></div>
@@ -107,22 +135,44 @@ export class Editor {
     this.gGrid = r.querySelector('g.grid');
     this.gFills = r.querySelector('g.fills');
     this.gOverlay = r.querySelector('g.overlay');
+    this.gMarkup = r.querySelector('g.markup');
+    this.gLive = r.querySelector('g.markup-live');
+    this.elMarkbar = r.querySelector('.markbar');
     this.elInspector = r.querySelector('.inspector');
     this.elDrawbar = r.querySelector('.drawbar');
     this.elLibrary = r.querySelector('.library');
     this.elHint = r.querySelector('.hint');
     this.elTotals = r.querySelector('.totals');
 
-    r.querySelector('.topbar').addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (!b) return;
-      if (b.dataset.tool) return this.setTool(b.dataset.tool);
-      this.action(b.dataset.a);
+    // Toque instantâneo (pointerdown) em vez de click: sem atraso e sem perder toques com micro-movimento.
+    onFastTap(r.querySelector('.topbar'), 'button', (b) => this.action(b.dataset.a));
+    onFastTap(this.elDrawbar, 'button', (b) => {
+      const d = b.dataset.d;
+      if (d === 'close') this.closeDrawing();
+      else if (d === 'finish') this.finishDrawing();
+      else if (d === 'undo') this.undo();
+      else if (d === 'cancel') this.cancelDrawing();
+    });
+    onFastTap(this.elMarkbar, 'button', (b) => this.markbarAction(b.dataset));
+    this.fan = new RadialMenu(r.querySelector('.stage'), {
+      items: FAN_ITEMS.map((it) => ({ ...it, icon: icon(it.icon) })),
+      pos: this.settings.fabPos,
+      onMove: (pos) => { this.settings.fabPos = pos; saveSettings(this.settings); },
+      isActive: (id) => (id === 'arc' ? this.arcMode : id === 'library' ? this.elLibrary.classList.contains('open') : this.tool === id),
+      onSelect: (id) => {
+        if (id === 'arc') this.action('arc');
+        else if (id === 'library') this.action('library');
+        else if (id === 'undo') this.undo();
+        else this.setTool(id);
+      },
     });
     this.svg.addEventListener('pointerdown', (e) => this.onDown(e));
     this.svg.addEventListener('pointermove', (e) => this.onMove(e));
     this.svg.addEventListener('pointerup', (e) => this.onUp(e));
     this.svg.addEventListener('pointercancel', (e) => this.onUp(e, true));
+    // Se a captura se perde sem pointerup (sistema, alerta, gesto do iPadOS), limpa o ponteiro —
+    // senão ele fica "fantasma" e o próximo toque vira pinça.
+    this.svg.addEventListener('lostpointercapture', (e) => { if (this.pointers.has(e.pointerId)) this.onUp(e, true); });
     this.svg.addEventListener('pointerleave', (e) => { if (!this.gesture && this.drawing) { this.drawing.preview = null; this.render(); } void e; });
     this.svg.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     this.svg.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -137,6 +187,7 @@ export class Editor {
   destroy() {
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('resize', this.onResize);
+    this.fan?.destroy();
     this.save();
   }
 
@@ -151,6 +202,7 @@ export class Editor {
     const pts = [];
     for (const s of this.content.shapes) pts.push(...polygonize(s));
     for (const t of this.content.texts) pts.push({ x: t.x, y: t.y }, { x: t.x + t.w, y: t.y + t.size * 3 });
+    pts.push(...markupPoints(this.content.markup));
     if (pts.length < 2) {
       const k = this.view?.k || 60;
       this.view = { k, x: w / 2, y: h / 2 };
@@ -181,6 +233,12 @@ export class Editor {
       sel: this.sel, tool: this.tool, reports: this.reports, drawing: this.drawing ? { ...this.drawing, arc: this.arcMode } : null,
       freehand: this.freehand,
     });
+    const M = `matrix(${v.k} 0 0 ${v.k} ${v.x} ${v.y})`;
+    if (this.markupDirty) { this.gMarkup.innerHTML = markupSVG(this.content.markup); this.markupDirty = false; }
+    this.gMarkup.setAttribute('transform', M);
+    this.gLive.setAttribute('transform', M);
+    this.gLive.innerHTML = (this.liveStroke ? strokeSVG(this.liveStroke) : '') +
+      (this.eraserPos ? `<circle cx="${this.eraserPos.x}" cy="${this.eraserPos.y}" r="${14 / v.k}" fill="#fff" fill-opacity=".5" stroke="#64748b" stroke-width="${1.5 / v.k}"/>` : '');
     this.updateStatus();
   }
 
@@ -192,6 +250,9 @@ export class Editor {
       point: this.drawing ? 'Toque para o próximo ponto · toque no 1º ponto para fechar' : 'Toque para marcar o ponto A',
       free: 'Desenhe o contorno com a Pencil — reconheço retas, arcos e cantos',
       text: 'Toque onde quer a anotação',
+      pen: 'Caneta: risque por cima do croqui — não altera medidas nem geometria',
+      arrow: 'Seta: arraste do ponto inicial até onde a seta deve apontar',
+      eraser: 'Borracha: passe sobre os traços da caneta/setas para apagar',
     };
     let hint = hints[this.tool];
     if (!this.content.calibrated && this.content.shapes.some((s) => s.vertices.length > 1) && this.tool === 'select') hint = 'Esboço sem escala — toque em um lado e digite a medida real';
@@ -207,8 +268,14 @@ export class Editor {
   }
 
   updateToolbar() {
-    this.root.querySelectorAll('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === this.tool));
-    this.root.querySelector('[data-a=arc]').classList.toggle('active', this.arcMode);
+    const iconKey = this.tool === 'point' && this.arcMode ? 'arc' : TOOL_ICON[this.tool];
+    this.fan?.setIcon(icon(iconKey), TOOL_LABEL[this.tool]);
+    this.fan?.refresh();
+    const vis = this.content.markup.visible !== false;
+    const mv = this.root.querySelector('[data-a=markupVis]');
+    mv.innerHTML = icon(vis ? 'eye' : 'eyeOff');
+    mv.classList.toggle('off', !vis);
+    this.updateMarkbar();
     this.root.querySelector('[data-a=unit]').textContent = this.content.unit === 'ft' ? 'ft·in' : 'm';
     this.root.querySelector('[data-a=undo]').disabled = !this.undoStack.length;
     this.root.querySelector('[data-a=redo]').disabled = !this.redoStack.length;
@@ -227,13 +294,45 @@ export class Editor {
       <button class="btn" data-d="finish" ${n < 2 ? 'disabled' : ''}>Concluir aberta</button>
       <button class="btn" data-d="undo">Desfazer ponto</button>
       <button class="btn danger" data-d="cancel">Cancelar</button>`;
-    this.elDrawbar.onclick = (e) => {
-      const d = e.target.closest('button')?.dataset.d;
-      if (d === 'close') this.closeDrawing();
-      else if (d === 'finish') this.finishDrawing();
-      else if (d === 'undo') this.undo();
-      else if (d === 'cancel') this.cancelDrawing();
-    };
+  }
+
+  // Paleta da caneta/seta/borracha: cor, espessura, visibilidade da camada.
+  updateMarkbar() {
+    const el = this.elMarkbar;
+    if (!MARK_TOOLS.includes(this.tool)) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const st = this.settings;
+    const vis = this.content.markup.visible !== false;
+    const n = this.content.markup.strokes.length;
+    el.innerHTML = (this.tool !== 'eraser'
+      ? MARK_COLORS.map((c) => `<button class="mk-color ${st.markColor === c.key ? 'on' : ''}" data-mc="${c.key}" aria-label="${c.name}" style="--c:${c.key}"></button>`).join('') +
+        '<span class="mk-sep"></span>' +
+        MARK_WIDTHS.map((w) => `<button class="mk-width ${st.markWidth === w.key ? 'on' : ''}" data-mw="${w.key}" aria-label="${w.name}"><i style="width:${w.key + 4}px;height:${w.key + 4}px;background:${st.markColor}"></i></button>`).join('') +
+        '<span class="mk-sep"></span>'
+      : `<span class="mk-label">${n} traço${n === 1 ? '' : 's'}</span>`) +
+      `<button class="mk-btn" data-mv="1" aria-label="Mostrar/ocultar anotações">${icon(vis ? 'eye' : 'eyeOff')}</button>` +
+      `<button class="mk-btn danger" data-mclear="1" ${n ? '' : 'disabled'}>Limpar</button>`;
+  }
+
+  async markbarAction(d) {
+    if (d.mc) { this.settings.markColor = d.mc; saveSettings(this.settings); this.updateMarkbar(); }
+    else if (d.mw) { this.settings.markWidth = +d.mw; saveSettings(this.settings); this.updateMarkbar(); }
+    else if (d.mv) this.action('markupVis');
+    else if (d.mclear) {
+      if (!(await confirmDialog('Apagar todas as anotações?', 'Só os traços da caneta e as setas. O croqui e as medidas não mudam.', { okLabel: 'Apagar', danger: true }))) return;
+      this.content.markup.strokes = [];
+      this.commit();
+    }
+  }
+
+  eraseAt(w) {
+    const r = 14 / this.view.k;
+    const m = this.content.markup;
+    const before = m.strokes.length;
+    m.strokes = m.strokes.filter((s) => !strokeHit(s, w, r));
+    if (m.strokes.length !== before) { this.gesture.removed += before - m.strokes.length; this.markupDirty = true; }
+    this.eraserPos = w;
+    this.render();
   }
 
   // ---------------- Histórico / salvar ----------------
@@ -245,6 +344,7 @@ export class Editor {
     this.redoStack = [];
     this.lastSnap = snap;
     this.fillsDirty = true;
+    this.markupDirty = true;
     this.saveSoon();
     this.updateToolbar();
     this.render();
@@ -252,8 +352,10 @@ export class Editor {
 
   restore(snap) {
     this.content = JSON.parse(snap);
+    ensureMarkup(this.content);
     this.lastSnap = snap;
     this.fillsDirty = true;
+    this.markupDirty = true;
     this.recomputeReports();
     if (this.drawing) {
       const s = findShape(this.content, this.drawing.shapeId);
@@ -305,6 +407,12 @@ export class Editor {
   setTool(t) {
     if (this.drawing && t !== 'point') this.finishDrawing(true);
     this.tool = t;
+    if (MARK_TOOLS.includes(t) && this.content.markup.visible === false) {
+      this.content.markup.visible = true;
+      this.commit();
+      toast('Camada de anotações visível');
+    }
+    if (MARK_TOOLS.includes(t)) { this.sel = null; this.updateInspector(); }
     if (t !== 'select' && this.sel?.kind !== 'shape') { this.sel = null; this.updateInspector(); }
     this.updateToolbar();
     this.render();
@@ -318,6 +426,13 @@ export class Editor {
       case 'arc': this.arcMode = !this.arcMode; if (this.tool !== 'point') this.setTool('point'); this.updateToolbar(); this.render(); break;
       case 'unit': this.content.unit = this.content.unit === 'ft' ? 'm' : 'ft'; this.inputUnit = this.content.unit; this.commit(); this.updateInspector(); break;
       case 'fit': this.fit(); this.render(); this.saveSoon(); break;
+      case 'markupVis': {
+        const m = this.content.markup;
+        m.visible = m.visible === false;
+        this.commit();
+        toast(m.visible ? 'Anotações visíveis' : 'Anotações ocultas (também na exportação)');
+        break;
+      }
       case 'library':
         this.elLibrary.classList.toggle('open');
         this.settings.library = this.elLibrary.classList.contains('open');
@@ -383,6 +498,8 @@ export class Editor {
     else if (k === 'f') this.setTool('free');
     else if (k === 't') this.setTool('text');
     else if (k === 'a') this.action('arc');
+    else if (k === 'm') this.setTool('pen');
+    else if (k === 'e') this.setTool('eraser');
     else if ((k === 'delete' || k === 'backspace') && this.sel) this.deleteSelection();
   }
 
@@ -538,6 +655,11 @@ export class Editor {
       }
     }
     if (e.pointerType === 'touch' && this.penActive) return; // rejeição de palma
+    // Novo gesto de toque (1º dedo): descarta ponteiros de toque que ficaram presos no mapa.
+    if (e.pointerType === 'touch' && e.isPrimary) {
+      for (const [id, q] of this.pointers) if (q.type === 'touch') this.pointers.delete(id);
+      if (this.gesture && !this.pointers.has(this.gesture.id)) this.abortGesture();
+    }
     try { this.svg.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     const p = this.local(e);
     this.pointers.set(e.pointerId, { x: p.x, y: p.y, type: e.pointerType });
@@ -553,6 +675,18 @@ export class Editor {
     } else if (this.tool === 'free') {
       if (drawInput) { this.gesture = { ...base, type: 'free' }; this.freehand = [w]; }
       else this.gesture = { ...base, type: 'pan' };
+    } else if (MARK_TOOLS.includes(this.tool)) {
+      if (!drawInput) this.gesture = { ...base, type: 'pan' };
+      else if (this.tool === 'eraser') { this.gesture = { ...base, type: 'erase', removed: 0 }; this.eraseAt(w); }
+      else {
+        this.liveStroke = {
+          id: uid(), type: this.tool, color: this.settings.markColor, width: this.settings.markWidth / this.view.k,
+          pressure: this.tool === 'pen' && e.pointerType === 'pen',
+          pts: this.tool === 'arrow' ? [w, { ...w }] : [{ x: w.x, y: w.y, p: e.pressure || 0.5 }],
+        };
+        this.gesture = { ...base, type: 'mark' };
+        this.render();
+      }
     } else if (this.tool === 'text') {
       this.gesture = { ...base, type: 'press', target: { kind: 'newtext', w } };
     } else {
@@ -560,7 +694,21 @@ export class Editor {
     }
   }
 
+  // Cancela o gesto em andamento sem aplicar nada.
+  abortGesture() {
+    const g = this.gesture;
+    this.gesture = null;
+    this.liveStroke = null;
+    this.eraserPos = null;
+    if (g?.type === 'free') this.freehand = null;
+    if (g?.type === 'place' && this.drawing) this.drawing.preview = null;
+    if (g && (['dragVertex', 'dragBulge', 'dragShape', 'dragText', 'resizeText'].includes(g.type) || (g.type === 'erase' && g.removed))) this.restore(this.lastSnap);
+    this.render();
+  }
+
   startPinch() {
+    if (this.gesture?.type === 'mark') this.liveStroke = null;
+    if (this.gesture?.type === 'erase') { this.eraserPos = null; if (this.gesture.removed) this.restore(this.lastSnap); }
     if (this.gesture?.type === 'place' && this.drawing) this.drawing.preview = null;
     if (this.gesture?.type === 'free') this.freehand = null;
     if (this.gesture && ['dragVertex', 'dragBulge', 'dragShape', 'dragText', 'resizeText'].includes(this.gesture.type)) this.restore(this.lastSnap);
@@ -595,6 +743,25 @@ export class Editor {
     const w = this.toWorld(p);
     switch (g.type) {
       case 'place': this.updatePlace(p); break;
+      case 'mark': {
+        const s = this.liveStroke;
+        if (s.type === 'arrow') s.pts[1] = w;
+        else {
+          const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+          for (const ce of coalesced) {
+            const q = this.toWorld(this.local(ce));
+            const last = s.pts[s.pts.length - 1];
+            if (dist(q, last) * this.view.k > 1.2) s.pts.push({ x: q.x, y: q.y, p: ce.pressure || 0.5 });
+          }
+        }
+        this.render();
+        break;
+      }
+      case 'erase': {
+        const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+        for (const ce of coalesced) this.eraseAt(this.toWorld(this.local(ce)));
+        break;
+      }
       case 'free': {
         const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
         for (const ce of coalesced) {
@@ -680,10 +847,18 @@ export class Editor {
     }
     if (e.pointerId !== g.id) return;
     this.gesture = null;
-    if (cancelled) { if (g.type === 'free') this.freehand = null; this.render(); return; }
+    if (cancelled) { this.gesture = g; this.abortGesture(); return; }
     switch (g.type) {
       case 'place': this.placePoint(); if (e.pointerType === 'touch' && this.drawing) this.drawing.preview = null; this.updateToolbar(); this.render(); break;
       case 'free': this.finishFreehand(); break;
+      case 'mark': {
+        const s = this.liveStroke;
+        this.liveStroke = null;
+        const ok = s.type === 'arrow' ? dist(s.pts[0], s.pts[1]) * this.view.k > 10 : s.pts.length >= 1;
+        if (ok) { this.content.markup.strokes.push(s); this.commit(); } else this.render();
+        break;
+      }
+      case 'erase': this.eraserPos = null; if (g.removed) this.commit(); else this.render(); break;
       case 'pan': this.saveSoon(); break;
       case 'press': this.tap(g.target); break;
       case 'dragVertex': case 'dragBulge': {

@@ -293,6 +293,7 @@ export function buildExportSVG(content, { title = '', subtitle = '', width = 220
   const pts = [];
   for (const s of content.shapes) pts.push(...polygonize(s));
   for (const t of content.texts) pts.push({ x: t.x, y: t.y }, { x: t.x + t.w, y: t.y + t.size * 3 });
+  pts.push(...markupPoints(content.markup));
   if (!pts.length) pts.push({ x: 0, y: 0 }, { x: 1, y: 1 });
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
@@ -342,11 +343,14 @@ export function buildExportSVG(content, { title = '', subtitle = '', width = 220
     `<text x="60" y="100" font-size="20" fill="#64748b">${esc(subtitle)}</text>` +
     `<line x1="50" x2="${width - 50}" y1="${header - 6}" y2="${header - 6}" stroke="#e2e8f0" stroke-width="2"/>` +
     `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${buildFills(content)}</g>` +
-    buildOverlay(content, v, {}, { export: true }) + scaleBar + legend + `</svg>`;
+    buildOverlay(content, v, {}, { export: true }) +
+    `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${markupSVG(content.markup)}</g>` +
+    scaleBar + legend + `</svg>`;
   return { svg, width, height };
 }
 
 import { textureName } from './textures.js';
+import { markupSVG, markupPoints } from './markup.js';
 const textureNameSafe = (f) => (f ? textureName(f) : '—');
 
 // Miniatura só com contornos (lista de pastas).

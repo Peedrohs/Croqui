@@ -30,6 +30,8 @@ e abra `http://localhost:8080`. Testes do solver/unidades: `node tests/solver.te
 
 | Ação | Como |
 |---|---|
+| Ferramentas | Botão redondo flutuante (arraste para onde preferir). Toque para abrir o leque: anel interno = Medir, Pontos, Arco, Mão livre, Texto; anel externo = Caneta, Seta, Borracha, Texturas, Desfazer. Segure o dedo num ícone para ver o nome; toque fora para fechar. |
+| Anotações | **Caneta** (sensível à pressão da Pencil), **Seta** (arraste do início à ponta) e **Borracha** (apaga só traços de anotação). Ficam numa camada separada: não viram segmentos e não mexem em medidas. Cor/espessura na paleta do topo; o olho oculta/mostra a camada (e decide se entra no PNG/PDF). |
 | Ponto a ponto | Ferramenta **Pontos**: toque no ponto A, depois B, C… Tocar no 1º ponto fecha a forma. Encaixa em 0/45/90°, no perpendicular ao lado anterior e no alinhamento com o 1º ponto. Segure e arraste para posicionar antes de soltar. |
 | Arco | Ligue **Arco** antes de marcar o próximo ponto (abaula para fora ao fechar). Ajuste arrastando o losango no meio do arco, ou digite **corda + flecha**. "Inverter arco" troca o lado. |
 | Mão livre | Ferramenta **Mão livre**: desenhe o contorno com a Pencil. O app detecta cantos, retas e arcos, fecha a forma e endireita ângulos quase retos. |
@@ -70,6 +72,9 @@ croqui/
   css/app.css
   js/app.js        rotas, tela de pastas, import/export JSON
   js/editor.js     ferramentas, gestos (Pointer Events), painéis, desfazer/refazer, autosave
+  js/fan.js        leque radial flutuante (molas, cascata)
+  js/motion.js     mola física, toque instantâneo (pointerdown), háptico
+  js/markup.js     camada de anotação (caneta, seta, borracha)
   js/model.js      estrutura de dados, estatísticas (área líquida descontando formas internas)
   js/geometry.js   vetores, arcos (bulge), área, point-in-polygon
   js/solver.js     solver de restrições
