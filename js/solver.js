@@ -16,6 +16,7 @@ const W_SNAP = 40;
 const W_PAR = 15;
 const W_KEEP = 1.5;
 const W_GAUGE = 0.03;
+const W_ORIENT = 4; // mantém a direção da parede mais longa: o desenho não gira sozinho
 const DEG = Math.PI / 180;
 
 export const TOL_ANGLE_DEG = 0.5;
@@ -149,6 +150,16 @@ export function solveShape(shape, opts = {}) {
   }
   Lref = Lref / (m || 1) || 1;
 
+  // Parede de referência para orientação.
+  let refSeg = 0, refLen = -1;
+  for (let i = 0; i < m; i++) {
+    const j = (i + 1) % n;
+    const L = Math.hypot(X[2 * j] - X[2 * i], X[2 * j + 1] - X[2 * i + 1]);
+    if (L > refLen) { refLen = L; refSeg = i; }
+  }
+  const refJ = (refSeg + 1) % n;
+  const refAng = Math.atan2(X[2 * refJ + 1] - X[2 * refSeg + 1], X[2 * refJ] - X[2 * refSeg]);
+
   const angleTargets = detectAngleTargets(scaledShape, X);
   const parallels = detectParallel(scaledShape, X);
 
@@ -171,6 +182,7 @@ export function solveShape(shape, opts = {}) {
       const lu = Math.hypot(ux, uy) || 1, lv = Math.hypot(vx, vy) || 1;
       r.push(W_PAR * ((ux * vy - uy * vx) / (lu * lv)) * Lref);
     }
+    if (m > 0) r.push(W_ORIENT * wrapAngle(Math.atan2(py(refJ) - py(refSeg), px(refJ) - px(refSeg)) - refAng) * Lref);
     for (let k = 0; k < Y.length; k++) r.push(W_GAUGE * (Y[k] - X0[k]));
     return r;
   };

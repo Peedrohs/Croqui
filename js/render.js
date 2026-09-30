@@ -45,7 +45,7 @@ export function buildFills(content, palette = CANVAS_LIGHT) {
     if (s.fill) out += renderFill(poly, s.fill, s.id);
     else out += `<path d="M${poly.map((p) => `${p.x} ${p.y}`).join('L')}Z" fill="${palette.emptyFill}" fill-opacity=".85"/>`;
   }
-  return out;
+  return out + buildObjectFills(content);
 }
 
 // ---------- Grade de pontos (tela), como no Freeform ----------
@@ -108,10 +108,11 @@ function dims(content, shape, v, report, opts) {
   const orient = orientation(shape);
   const unit = content.unit;
   let out = '';
-  const px = opts.export ? 22 : 14;
+  const px = opts.export ? 22 : opts.dimPx || 14;
   for (let i = 0; i < m; i++) {
     const seg = shape.segments[i];
     const info = segInfo(shape, i);
+    const live = opts.live?.shapeId === shape.id && opts.live.segs.includes(i);
     const a = S(info.p0, v), b = S(info.p1, v);
     const dd = sub(b, a);
     const L = Math.hypot(dd.x, dd.y);
@@ -121,9 +122,15 @@ function dims(content, shape, v, report, opts) {
     const out1 = shape.closed ? (orient > 0 ? mul(nL, -1) : nL) : mul(nL, -1);
     const measured = seg.length != null;
     const bad = report?.badSegments?.includes(i);
-    const color = bad ? C.bad : measured ? C.measured : C.approx;
+    let color = bad ? C.bad : measured ? C.measured : C.approx;
     let text = measured ? formatLength(seg.length, unit) : content.calibrated ? '~' + formatLength(info.chord, unit) : '?';
     if (bad) text = '⚠ ' + text;
+    // Arrastando um vértice: mostra o comprimento ao vivo (e a medida travada, se houver).
+    if (live && content.calibrated) {
+      const cur = formatLength(info.chord, unit);
+      text = measured && cur !== formatLength(seg.length, unit) ? `${cur} · 🔒 ${formatLength(seg.length, unit)}` : cur;
+      color = C.accent;
+    }
     const hit = opts.export ? '' : `data-hit="dim" data-s="${shape.id}" data-i="${i}"`;
     const ang = upright(d);
     if (!info.arc) {
@@ -166,11 +173,14 @@ function rightMarks(shape, v, big) {
 }
 
 function areaLabel(content, shape, v, st, opts) {
+  if (opts.showArea === false && !opts.export) return shape.name && shape.closed ? label(...Object.values(S(labelPoint(polygonize(shape)), v)), 0, shape.name, { color: C.ink, px: 13 }) : '';
   if (!shape.closed || shape.vertices.length < 3) return '';
   const c = S(labelPoint(polygonize(shape)), v);
   if (!content.calibrated && !opts.export) return shape.name ? label(c.x, c.y, 0, shape.name, { color: C.ink, px: 13 }) : '';
   const s = st.per[shape.id];
-  const areaTxt = formatArea(s.net, content.unit) + (s.net !== s.area ? ' (líq.)' : '');
+  const useNet = opts.netArea !== false;
+  const shown = useNet ? s.net : s.net + (s.objArea || 0);
+  const areaTxt = formatArea(shown, content.unit) + (Math.abs(shown - s.area) > 1e-9 ? ' (líq.)' : '');
   const px = opts.export ? 22 : 13;
   let o = '';
   if (shape.name) o += label(c.x, c.y - px, 0, shape.name, { color: C.ink, px, weight: 700 });
@@ -219,13 +229,20 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
     if (!opts.export) {
       for (let i = 0, m = segmentCount(s); i < m; i++) {
         const segSel = ui.sel?.kind === 'seg' && ui.sel.shapeId === s.id && ui.sel.i === i;
-        if (segSel) o += `<path d="${segPath(s, i, v)}" fill="none" stroke="${C.accent}" stroke-width="6" stroke-linecap="round" opacity=".45"/>`;
+        if (segSel) {
+          const [e0, e1] = [S(s.vertices[i], v), S(s.vertices[(i + 1) % s.vertices.length], v)];
+          o += `<path d="${segPath(s, i, v)}" fill="none" stroke="${C.accentFill}" stroke-width="9" stroke-linecap="round" opacity=".35"/>` +
+            `<path d="${segPath(s, i, v)}" fill="none" stroke="${C.accent}" stroke-width="3.5" stroke-linecap="round"/>` +
+            [e0, e1].map((q) => `<circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="11" fill="${C.accentFill}" fill-opacity=".25"/><circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="6.5" fill="${C.accent}" stroke="${C.handle}" stroke-width="2.5"/>`).join('');
+        }
         o += `<path d="${segPath(s, i, v)}" fill="none" stroke="transparent" stroke-width="28" data-hit="seg" data-s="${s.id}" data-i="${i}"/>`;
       }
     }
     o += rightMarks(s, v, opts.export);
   }
-  for (const s of content.shapes) o += dims(content, s, v, ui.reports?.[s.id], opts);
+  o += objectsOverlay(content, v, ui, opts);
+  const dopts = { ...opts, live: ui.live };
+  for (const s of content.shapes) o += dims(content, s, v, ui.reports?.[s.id], dopts);
   for (const s of content.shapes) o += areaLabel(content, s, v, st, opts);
   o += texts(content, v, ui, opts);
 
@@ -281,6 +298,28 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
       }
       o += `<circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="6" fill="${dr.snap ? C.guide : C.accent}" stroke="${C.handle}" stroke-width="2"/>`;
     }
+    // Pontas soltas / pontos quase juntos: anel vermelho pulsando.
+    for (const e of ui.loose?.ends || []) {
+      const sh = content.shapes.find((x) => x.id === e.shapeId);
+      if (!sh) continue;
+      const q = S(sh.vertices[e.i], v);
+      o += `<circle class="loose" cx="${f1(q.x)}" cy="${f1(q.y)}" r="13" fill="none" stroke="${C.bad}" stroke-width="2.5" stroke-dasharray="4 3"/>`;
+    }
+    for (const [a, b] of ui.loose?.pairs || []) {
+      const sa = content.shapes.find((x) => x.id === a.shapeId), sb = content.shapes.find((x) => x.id === b.shapeId);
+      if (!sa || !sb) continue;
+      const qa = S(sa.vertices[a.i], v), qb = S(sb.vertices[b.i], v);
+      o += `<circle class="loose" cx="${f1((qa.x + qb.x) / 2)}" cy="${f1((qa.y + qb.y) / 2)}" r="18" fill="${C.bad}" fill-opacity=".12" stroke="${C.bad}" stroke-width="2.5"/>`;
+    }
+    // Guias de encaixe (alinhamento, extensão de parede) e realce do encaixe.
+    for (const g of ui.guides || []) {
+      const a = S(g[0], v), b = S(g[1], v);
+      o += `<path d="M${f1(a.x)} ${f1(a.y)}L${f1(b.x)} ${f1(b.y)}" stroke="${C.guide}" stroke-width="1.2" stroke-dasharray="3 4"/>`;
+    }
+    if (ui.snapRing) {
+      const q = S(ui.snapRing, v);
+      o += `<circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="15" fill="${C.guide}" fill-opacity=".18" stroke="${C.guide}" stroke-width="2.5"/>`;
+    }
     if (ui.freehand?.length > 1) {
       const pts = ui.freehand.map((p) => S(p, v));
       o += `<path d="M${pts.map((p) => `${f1(p.x)} ${f1(p.y)}`).join('L')}" stroke="${C.accent}" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>`;
@@ -290,13 +329,14 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
 }
 
 // ---------- Exportação: SVG completo e autossuficiente ----------
-export function buildExportSVG(content, { title = '', subtitle = '', project = '', date = '', logo = null, width = 2200 } = {}) {
+export function buildExportSVG(content, { title = '', subtitle = '', project = '', date = '', logo = null, width = 2200, includeMarkup = true, netArea = true } = {}) {
   const st = stats(content);
   const pts = [];
   for (const s of content.shapes) pts.push(...polygonize(s));
   for (const t of content.texts) pts.push({ x: t.x, y: t.y }, { x: t.x + t.w, y: t.y + t.size * 3 });
   for (const im of content.images || []) pts.push({ x: im.x, y: im.y }, { x: im.x + im.w, y: im.y + im.h });
-  pts.push(...markupPoints(content.markup));
+  for (const ob of content.objects || []) pts.push(...objectOutline(ob));
+  if (includeMarkup) pts.push(...markupPoints(content.markup));
   if (!pts.length) pts.push({ x: 0, y: 0 }, { x: 1, y: 1 });
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
@@ -323,12 +363,12 @@ export function buildExportSVG(content, { title = '', subtitle = '', project = '
       legend += `<line x1="50" x2="${width - 50}" y1="${y}" y2="${y}" stroke="#e2e8f0"/>`;
       legend += `<text x="${cols[0]}" y="${y + 26}" font-size="20" font-weight="600" fill="#0f172a">${esc(name)}</text>` +
         `<text x="${cols[1]}" y="${y + 26}" font-size="20" fill="#334155">${esc(textureNameSafe(s.fill))}</text>` +
-        `<text x="${cols[2]}" y="${y + 26}" font-size="20" fill="#0f172a">${esc(formatArea(p.net, content.unit))}${p.net !== p.area ? ' líq.' : ''}</text>` +
+        `<text x="${cols[2]}" y="${y + 26}" font-size="20" fill="#0f172a">${esc(formatArea(netArea ? p.net : p.net + (p.objArea || 0), content.unit))}${p.objArea && netArea ? ` líq. (bruta ${esc(formatArea(p.area, content.unit))})` : ''}</text>` +
         `<text x="${cols[3]}" y="${y + 26}" font-size="20" fill="#0f172a">${esc(formatLength(p.perimeter, content.unit))}</text>`;
       y += rowH;
     });
     legend += `<line x1="50" x2="${width - 50}" y1="${y}" y2="${y}" stroke="#94a3b8"/>`;
-    legend += `<text x="${cols[0]}" y="${y + 28}" font-size="21" font-weight="800" fill="#0f172a">Total</text><text x="${cols[2]}" y="${y + 28}" font-size="21" font-weight="800" fill="#0f172a">${esc(formatArea(st.area, content.unit))}</text>`;
+    legend += `<text x="${cols[0]}" y="${y + 28}" font-size="21" font-weight="800" fill="#0f172a">Total</text><text x="${cols[2]}" y="${y + 28}" font-size="21" font-weight="800" fill="#0f172a">${esc(formatArea(netArea ? st.areaNet : st.area, content.unit))}${netArea && st.objArea ? ' líquida' : ''}</text>`;
   }
 
   // Barra de escala.
@@ -347,14 +387,15 @@ export function buildExportSVG(content, { title = '', subtitle = '', project = '
     (subtitle ? `<text x="60" y="100" font-size="20" fill="#64748b">${esc(subtitle)}</text>` : '') +
     `<line x1="50" x2="${width - 50}" y1="${header - 6}" y2="${header - 6}" stroke="#e2e8f0" stroke-width="2"/>` +
     `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${buildImages(content)}${buildFills(content, CANVAS_LIGHT)}</g>` +
-    buildOverlay(content, v, {}, { export: true }) +
-    `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${markupSVG(content.markup)}</g>` +
+    buildOverlay(content, v, {}, { export: true, netArea }) +
+    (includeMarkup ? `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${markupSVG(content.markup)}</g>` : '') +
     scaleBar + legend + exportFooter(width, height - footerH, footerH, { project: project || title, date, logo }) + `</svg>`;
   return { svg, width, height };
 }
 
 import { textureName } from './textures.js';
 import { markupSVG, markupPoints } from './markup.js';
+import { buildObjectFills, objectOutline, objectType } from './objects.js';
 const textureNameSafe = (f) => (f ? textureName(f) : '—');
 
 // Miniatura só com contornos (lista de pastas).
@@ -379,4 +420,41 @@ function exportFooter(W, y, H, { project, date, logo }) {
     (logo ? `<image href="${logo.src}" x="60" y="${18 + (H - 18 - lh) / 2}" width="${lw}" height="${lh}" opacity=".9"/>` : '') +
     `<text x="${W - 60}" y="${18 + H / 2 - 4}" font-size="20" font-weight="700" fill="#1c1c1e" text-anchor="end">${esc(project)}</text>` +
     `<text x="${W - 60}" y="${18 + H / 2 + 22}" font-size="17" fill="#6b6b70" text-anchor="end">${esc(date)}</text></g>`;
+}
+
+// Colunas/objetos: contorno, cotas (opcionais por objeto) e alças quando selecionado.
+function objectsOverlay(content, v, ui, opts) {
+  let o = '';
+  const unit = content.unit;
+  const px = opts.export ? 18 : Math.max(11, (opts.dimPx || 14) - 2);
+  for (const ob of content.objects || []) {
+    const poly = objectOutline(ob).map((q) => S(q, v));
+    const d = 'M' + poly.map((q) => `${f1(q.x)} ${f1(q.y)}`).join('L') + 'Z';
+    const sel = !opts.export && ui.sel?.kind === 'obj' && ui.sel.id === ob.id;
+    o += `<path d="${d}" fill="none" stroke="${sel ? C.accent : C.ink}" stroke-width="${sel ? 2.5 : opts.export ? 2.2 : 1.8}"/>`;
+    if (!opts.export) o += `<path d="${d}" fill="transparent" stroke="transparent" stroke-width="16" data-hit="obj" data-t="${ob.id}"/>`;
+    const c = S({ x: ob.x, y: ob.y }, v);
+    if (ob.showDims) {
+      const T = objectType(ob);
+      if (ob.size.d != null) {
+        const r = (ob.size.d / 2) * v.k;
+        o += label(c.x, c.y + r + px, 0, '⌀ ' + formatLength(ob.size.d, unit), { color: C.measured, px, weight: 600 });
+      } else {
+        const a = ((ob.rot || 0) * Math.PI) / 180, ux = { x: Math.cos(a), y: Math.sin(a) }, uy = { x: -Math.sin(a), y: Math.cos(a) };
+        const hw = (ob.size.w / 2) * v.k, hh = (ob.size.h / 2) * v.k;
+        const top = add(c, mul(uy, -(hh + px))), side = add(c, mul(ux, hw + px * 1.2));
+        o += label(top.x, top.y, upright(ux), formatLength(ob.size.w, unit), { color: C.measured, px, weight: 600 });
+        o += label(side.x, side.y, upright(uy), formatLength(ob.size.h, unit), { color: C.measured, px, weight: 600 });
+      }
+      void T;
+    }
+    if (sel && objectType(ob).rotatable) {
+      const a = ((ob.rot || 0) * Math.PI) / 180, uy = { x: -Math.sin(a), y: Math.cos(a) };
+      const hh = (ob.size.h / 2) * v.k;
+      const h = add(c, mul(uy, -(hh + 34)));
+      o += `<path d="M${f1(c.x - uy.x * hh * -1)} ${f1(c.y + uy.y * -hh)}L${f1(h.x)} ${f1(h.y)}" stroke="${C.accent}" stroke-width="1.5"/>` +
+        `<g data-hit="objrot" data-t="${ob.id}"><circle cx="${f1(h.x)}" cy="${f1(h.y)}" r="20" fill="transparent"/><circle cx="${f1(h.x)}" cy="${f1(h.y)}" r="8" fill="${C.handle}" stroke="${C.accent}" stroke-width="2.5"/></g>`;
+    }
+  }
+  return o;
 }

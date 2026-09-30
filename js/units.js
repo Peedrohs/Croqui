@@ -3,25 +3,41 @@ export const M_PER_FT = 0.3048;
 export const M_PER_IN = 0.0254;
 export const M2_PER_FT2 = M_PER_FT * M_PER_FT;
 
-const FRACS = { 0: '', 0.25: '¼', 0.5: '½', 0.75: '¾' };
+// Precisão de exibição (Configurações → Medidas). Os valores guardados não mudam.
+const PREC = { ftDen: 4, mDec: 2 };
+export function setPrecision({ ftDen, mDec } = {}) {
+  if ([2, 4, 8, 16].includes(+ftDen)) PREC.ftDen = +ftDen;
+  if ([0, 1, 2, 3].includes(+mDec)) PREC.mDec = +mDec;
+}
+export const getPrecision = () => ({ ...PREC });
+
+const GLYPH = { '1/2': '½', '1/4': '¼', '3/4': '¾', '1/8': '⅛', '3/8': '⅜', '5/8': '⅝', '7/8': '⅞' };
+function fracText(num, den) {
+  if (!num) return '';
+  let g = gcd(num, den);
+  const k = `${num / g}/${den / g}`;
+  return GLYPH[k] ?? ' ' + k;
+}
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 
 export function formatLength(m, unit) {
   if (m == null || !isFinite(m)) return '?';
   if (unit === 'ft') {
     const neg = m < 0;
-    const q = Math.round((Math.abs(m) / M_PER_IN) * 4) / 4; // 1/4"
+    const D = PREC.ftDen;
+    const q = Math.round((Math.abs(m) / M_PER_IN) * D) / D;
     let ft = Math.floor(q / 12 + 1e-9);
     let inch = q - ft * 12;
     if (inch >= 12 - 1e-9) { ft += 1; inch = 0; }
     const whole = Math.floor(inch + 1e-9);
-    const frac = FRACS[Math.round((inch - whole) * 4) / 4] ?? '';
+    const frac = fracText(Math.round((inch - whole) * D), D);
     let s;
     if (ft === 0) s = `${whole}${frac}"`;
     else if (whole === 0 && !frac) s = `${ft}'`;
     else s = `${ft}' ${whole}${frac}"`;
     return (neg ? '−' : '') + s;
   }
-  return m.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' m';
+  return m.toLocaleString('pt-BR', { minimumFractionDigits: PREC.mDec, maximumFractionDigits: PREC.mDec }) + ' m';
 }
 
 export function formatArea(m2, unit) {

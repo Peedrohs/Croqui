@@ -6,8 +6,14 @@ import { formatLength, formatArea, parseNumber } from './units.js';
 import { solveShape } from './solver.js';
 import { recognizeStroke } from './freehand.js';
 import {
-  newShape, newSegment, solveInContent, findShape, shapeAt, stats, insertVertex, deleteVertex, moveShape, hasMeasures,
+  newShape, newSegment, solveInContent, findShape, shapeAt, stats, deleteVertex, moveShape, hasMeasures,
+  splitSegment, splitSegmentN, segmentParamAt, removeVertex, mergeWithNext, mergeWithPrev, simplifyShape, closeShape,
+  mergeVertices, looseVertices, deleteSegment, reverseShape,
 } from './model.js';
+import { OBJECT_TYPES, newObject, objectAt, objectType, objectPreviewSVG } from './objects.js';
+import { showContextMenu, hideContextMenu } from './ctxmenu.js';
+import { labelPoint, norm, distToSegment } from './geometry.js';
+import { lengthTolerance } from './solver.js';
 import { buildFills, buildGrid, buildOverlay, buildThumb, buildImages } from './render.js';
 import { TEXTURES, PAVER_PATTERNS, PAVER_COLORS, DECK_COLORS, previewSVG, defaultFill, textureName } from './textures.js';
 import { exportPNG, exportPDF, safeName } from './export.js';
@@ -32,6 +38,7 @@ const ICON = {
   shapes: '<rect x="3.5" y="11.5" width="9" height="9" rx="1.5"/><circle cx="16.5" cy="7.5" r="4.5"/>',
   textures: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M3.5 12h17M12 3.5v17M3.5 7.8h8.5M12 16.2h8.5"/>',
   attach: '<path d="M20 11.5l-7.8 7.8a5 5 0 01-7.1-7.1l8.5-8.5a3.3 3.3 0 014.7 4.7l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8"/>',
+  objects: '<ellipse cx="8" cy="7" rx="3.5" ry="1.6"/><path d="M4.5 7v10c0 .9 1.6 1.6 3.5 1.6s3.5-.7 3.5-1.6V7"/><rect x="14" y="5.5" width="6" height="13" rx="1"/>',
   undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/>',
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/>',
   share: '<path d="M12 3v12M7.5 7.5L12 3l4.5 4.5"/><path d="M6 11H5v9h14v-9h-1"/>',
@@ -51,7 +58,7 @@ const TOOLS = [
 const ACTIONS_CENTER = [
   { a: 'shapes', label: 'Formas', icon: 'shapes' },
   { a: 'library', label: 'Texturas', icon: 'textures' },
-  { a: 'attach', label: 'Anexo', icon: 'attach' },
+  { a: 'objects', label: 'Objetos', icon: 'objects' },
 ];
 
 export class Editor {
@@ -64,7 +71,10 @@ export class Editor {
     this.content = sketch.content;
     ensureMarkup(this.content);
     this.content.images ??= [];
+    this.content.objects ??= [];
     this.settings = getSettings();
+    this.snap = null;        // estado do encaixe em andamento (anel, guias)
+    this.pendingMerge = null; // "Unir com…": aguardando o 2º vértice
     this.pal = canvasPalette();
     this.markupDirty = true;
     this.imagesDirty = true;
@@ -127,11 +137,13 @@ export class Editor {
         <div class="drawbar hidden"></div>
         <div class="lasso-bar hidden"><button class="btn" data-l="dup">Duplicar</button><button class="btn danger" data-l="del">Apagar</button></div>
         <aside class="inspector hidden"></aside>
-        <aside class="library ${this.settings.library ? 'open' : ''}">
-          <div class="lib-head"><b>Texturas</b><span>Arraste para dentro de uma área</span></div>
-          <div class="lib-grid">${TEXTURES.map((t, i) => `<div class="lib-item" data-tex="${i}">${previewSVG(t, 64)}<span>${esc(t.name.replace('Paver · ', ''))}</span>${t.key === 'pavers' ? '<em>paver</em>' : ''}</div>`).join('')}</div>
+        <aside class="library ${this.settings.library ? 'open' : ''}" data-tab="${this.settings.libraryTab || 'textures'}">
+          <div class="lib-head"><div class="seg2 lib-tabs"><button data-lt="textures">Texturas</button><button data-lt="objects">Objetos</button></div>
+            <span class="lib-sub"></span></div>
+          <div class="lib-grid tex">${TEXTURES.map((t, i) => `<div class="lib-item" data-tex="${i}">${previewSVG(t, 64)}<span>${esc(t.name.replace('Paver · ', ''))}</span>${t.key === 'pavers' ? '<em>paver</em>' : ''}</div>`).join('')}</div>
+          <div class="lib-grid obj">${Object.entries(OBJECT_TYPES).map(([k, t]) => `<div class="lib-item" data-obj="${k}">${objectPreviewSVG(k, 64)}<span>${esc(t.name)}</span><em>${esc(t.category)}</em></div>`).join('')}</div>
         </aside>
-        <div class="statusbar"><span class="hint"></span><span class="totals"></span></div>
+        <div class="statusbar"><span class="left"><button class="shape-state hidden" data-ss="1"></button><span class="hint"></span></span><span class="totals"></span></div>
       </div>
     </div>`;
     this.stage = r.querySelector('.stage');
@@ -147,6 +159,10 @@ export class Editor {
     this.elLasso = r.querySelector('.lasso-bar');
     this.elLibrary = r.querySelector('.library');
     this.elHint = r.querySelector('.hint');
+    this.elState = r.querySelector('.shape-state');
+    onFastTap(this.elState.parentElement, '.shape-state', () => this.stateAction());
+    onFastTap(r.querySelector('.lib-tabs'), 'button', (b) => this.setLibraryTab(b.dataset.lt));
+    this.setLibraryTab(this.settings.libraryTab || 'textures', true);
     this.elTotals = r.querySelector('.totals');
 
     // Toque instantâneo (pointerdown): sem atraso e sem perder toques com micro-movimento.
@@ -239,15 +255,16 @@ export class Editor {
     const v = this.view;
     const P = this.pal;
     const M = `matrix(${v.k} 0 0 ${v.k} ${v.x} ${v.y})`;
-    this.gGrid.innerHTML = buildGrid(v, w, h, this.content.unit, P);
+    this.gGrid.innerHTML = this.settings.showGrid === false ? '' : buildGrid(v, w, h, this.content.unit, P);
+    this.loose = this.tool === 'markup' ? null : looseVertices(this.content, 22 / v.k);
     if (this.imagesDirty) { this.gImages.innerHTML = buildImages(this.content); this.imagesDirty = false; }
     this.gImages.setAttribute('transform', M);
     if (this.fillsDirty) { this.gFills.innerHTML = buildFills(this.content, P); this.fillsDirty = false; }
     this.gFills.setAttribute('transform', M);
     this.gOverlay.innerHTML = this.imageOverlay() + buildOverlay(this.content, v, {
       sel: this.sel, tool: this.tool, reports: this.reports, drawing: this.drawing ? { ...this.drawing, arc: this.arcMode } : null,
-      freehand: this.freehand,
-    }, { palette: P });
+      freehand: this.freehand, loose: this.loose, guides: this.snap?.guides, snapRing: this.snap?.ring, live: this.live,
+    }, { palette: P, dimPx: this.settings.dimPx, showArea: this.settings.showArea, netArea: this.settings.netArea });
     const dark = P.name === 'dark';
     if (this.markupDirty) { this.gMarkup.innerHTML = markupSVG(this.content.markup, { dark }); this.markupDirty = false; }
     this.gMarkup.setAttribute('transform', M);
@@ -300,12 +317,16 @@ export class Editor {
     if (!this.content.calibrated && this.content.shapes.some((s) => s.vertices.length > 1) && this.tool === 'select') hint = 'Esboço sem escala — toque em um lado e digite a medida real';
     this.elHint.textContent = hint;
     const selShape = this.sel?.shapeId && findShape(this.content, this.sel.shapeId);
-    if (!this.content.calibrated) { this.elTotals.textContent = ''; return; }
+    this.updateShapeState(selShape);
+    if (!this.content.calibrated || this.settings.showArea === false) { this.elTotals.textContent = ''; return; }
+    const net = this.settings.netArea !== false;
     if (selShape) {
       const p = st.per[selShape.id];
-      this.elTotals.innerHTML = `<b>${esc(selShape.name || 'Forma')}</b> · ${selShape.closed ? `Área ${formatArea(p.net, u)} · ` : ''}Perímetro ${formatLength(p.perimeter, u)}`;
+      const a = net ? p.net : p.net + (p.objArea || 0);
+      this.elTotals.innerHTML = `<b>${esc(selShape.name || 'Forma')}</b> · ${selShape.closed ? `Área ${formatArea(a, u)}${p.objArea && net ? ' líq.' : ''} · ` : ''}Perímetro ${formatLength(p.perimeter, u)}`;
     } else {
-      this.elTotals.innerHTML = `Área total <b>${formatArea(st.area, u)}</b> · Perímetro <b>${formatLength(st.perimeter, u)}</b>`;
+      const a = net ? st.areaNet : st.area;
+      this.elTotals.innerHTML = `Área total <b>${formatArea(a, u)}</b>${st.objArea && net ? ` líq. <span class="muted">(bruta ${formatArea(st.area, u)})</span>` : ''} · Perímetro <b>${formatLength(st.perimeter, u)}</b>`;
     }
   }
 
@@ -315,7 +336,9 @@ export class Editor {
       b.classList.toggle('on', on);
       b.setAttribute('aria-pressed', on);
     });
-    this.root.querySelector('.fbar [data-a=library]').classList.toggle('on', this.elLibrary.classList.contains('open'));
+    const libOpen = this.elLibrary.classList.contains('open');
+    this.root.querySelector('.fbar [data-a=library]').classList.toggle('on', libOpen && this.elLibrary.dataset.tab === 'textures');
+    this.root.querySelector('.fbar [data-a=objects]').classList.toggle('on', libOpen && this.elLibrary.dataset.tab === 'objects');
     this.root.querySelector('.fbar [data-a=undo]').disabled = !this.undoStack.length;
     this.showPalette(this.tool === 'markup');
     if (this.tool === 'markup') this.palette.refresh();
@@ -403,6 +426,7 @@ export class Editor {
     this.content = JSON.parse(snap);
     ensureMarkup(this.content);
     this.content.images ??= [];
+    this.content.objects ??= [];
     this.lastSnap = snap;
     this.fillsDirty = true;
     this.markupDirty = true;
@@ -427,6 +451,7 @@ export class Editor {
     const s = this.sel;
     if (s.kind === 'text') return this.content.texts.some((t) => t.id === s.id);
     if (s.kind === 'image') return this.content.images.some((t) => t.id === s.id);
+    if (s.kind === 'obj') return this.content.objects.some((t) => t.id === s.id);
     const sh = findShape(this.content, s.shapeId);
     if (!sh) return false;
     if (s.kind === 'seg') return s.i < segmentCount(sh);
@@ -486,18 +511,29 @@ export class Editor {
         toast(m.visible ? 'Anotações visíveis' : 'Anotações ocultas (também na exportação)');
         break;
       }
-      case 'library':
-        this.elLibrary.classList.toggle('open');
+      case 'library': case 'objects': {
+        const tab = a === 'objects' ? 'objects' : 'textures';
+        const open = this.elLibrary.classList.contains('open');
+        if (open && this.elLibrary.dataset.tab === tab) this.elLibrary.classList.remove('open');
+        else { this.elLibrary.classList.add('open'); this.setLibraryTab(tab); }
         this.settings.library = this.elLibrary.classList.contains('open');
         saveSettings(this.settings);
         this.updateToolbar();
         break;
+      }
       case 'shapes': return this.shapesMenu();
       case 'attach': return this.attachImage();
       case 'export': return this.exportMenu();
       case 'more': return this.moreMenu();
       case 'settings':
-        return openSettings({ onChange: (s) => { Object.assign(this.settings, { pencilOnly: s.pencilOnly, penSeen: s.penSeen, defaultUnit: s.defaultUnit }); } });
+        return openSettings({ onChange: (s) => {
+          const { pencil, library, libraryTab, ...rest } = s;
+          void pencil; void library; void libraryTab;
+          Object.assign(this.settings, rest);
+          this.fillsDirty = true;
+          this.render();
+          this.updateInspector();
+        } });
       case 'sketchMenu': return this.sketchMenu();
     }
     void btn;
@@ -507,6 +543,7 @@ export class Editor {
     const vis = this.content.markup.visible !== false;
     const v = await menu('Mais opções', [
       { label: 'Configurações…', value: 'settings' },
+      { label: 'Anexar foto de referência…', value: 'attach' },
       { label: `Unidade deste croqui: ${this.content.unit === 'ft' ? 'pés/pol → trocar para metros' : 'metros → trocar para pés/pol'}`, value: 'unit' },
       { label: 'Ajustar desenho à tela', value: 'fit' },
       { label: vis ? 'Ocultar anotações' : 'Mostrar anotações', value: 'markupVis' },
@@ -554,6 +591,9 @@ export class Editor {
       subtitle: this.content.calibrated ? '' : 'Esboço sem escala',
       project: this.folder.name + (this.sketches.length > 1 ? ' · ' + this.sketch.name : ''),
       date,
+      useLogo: this.settings.exportLogo !== false,
+      includeMarkup: this.settings.exportMarkup !== false,
+      netArea: this.settings.netArea !== false,
     };
     const base = safeName(this.folder.name + '-' + this.sketch.name);
     try {
@@ -674,6 +714,7 @@ export class Editor {
     if (!s) return;
     if (s.kind === 'text') this.content.texts = this.content.texts.filter((t) => t.id !== s.id);
     else if (s.kind === 'image') this.content.images = this.content.images.filter((t) => t.id !== s.id);
+    else if (s.kind === 'obj') this.content.objects = this.content.objects.filter((t) => t.id !== s.id);
     else if (s.kind === 'vertex') { const sh = findShape(this.content, s.shapeId); deleteVertex(this.content, sh, s.i); if (findShape(this.content, sh.id)) this.solve(sh); }
     else this.content.shapes = this.content.shapes.filter((x) => x.id !== s.shapeId);
     this.sel = null;
@@ -682,58 +723,112 @@ export class Editor {
   }
 
   // ---------------- Desenho ponto a ponto ----------------
-  snapPoint(p) {
-    let w = this.toWorld(p);
+  // ---------------- Encaixe (snap) ----------------
+  // Motor único para desenhar, arrastar vértices e posicionar colunas. Tolerâncias em px de tela.
+  // opts: { exclude: Set("shapeId:i"), from, prev, allowClose: shape }
+  snapWorld(w, opts = {}) {
     const k = this.view.k;
-    const res = { w, snap: false, closeHint: false, guide: null };
-    const s = this.drawing && findShape(this.content, this.drawing.shapeId);
-    if (s && s.vertices.length >= 3 && dist(w, s.vertices[0]) < 24 / k) return { ...res, w: { ...s.vertices[0] }, snap: true, closeHint: true };
-    for (const o of this.content.shapes) {
-      for (let i = 0; i < o.vertices.length; i++) {
-        if (o === s && i === o.vertices.length - 1) continue;
-        if (dist(w, o.vertices[i]) < 16 / k) return { ...res, w: { x: o.vertices[i].x, y: o.vertices[i].y }, snap: true };
-      }
+    const R = (this.settings.snapPx || 15) / k;
+    const res = { w: { ...w }, target: null, close: false, guides: [], ring: null, kind: null };
+    const cs = opts.allowClose;
+    if (cs && cs.vertices.length >= 3 && dist(w, cs.vertices[0]) < R * 1.4) {
+      return { ...res, w: { ...cs.vertices[0] }, close: true, ring: cs.vertices[0], kind: 'close', target: { shapeId: cs.id, i: 0 } };
     }
-    if (s && s.vertices.length) {
-      const last = s.vertices[s.vertices.length - 1];
-      const d = sub(w, last);
-      const L = Math.hypot(d.x, d.y);
+    if (this.settings.snap === false) return res;
+    // 1) vértice existente
+    let best = null, bd = R;
+    for (const o of this.content.shapes) o.vertices.forEach((v, i) => {
+      if (opts.exclude?.has(o.id + ':' + i)) return;
+      const d = dist(w, v);
+      if (d < bd) { bd = d; best = { shapeId: o.id, i, v }; }
+    });
+    if (best) return { ...res, w: { x: best.v.x, y: best.v.y }, target: { shapeId: best.shapeId, i: best.i }, ring: best.v, kind: 'vertex' };
+    let p = { ...w };
+    // 2) ângulo em relação ao ponto anterior (0/45/90 e perpendicular à parede anterior)
+    let dir = null;
+    if (opts.from) {
+      const d = sub(p, opts.from), L = Math.hypot(d.x, d.y);
       if (L > 1e-9) {
         const ang = Math.atan2(d.y, d.x);
         const cands = [];
         for (let j = 0; j < 8; j++) cands.push((j * Math.PI) / 4);
-        if (s.vertices.length >= 2) {
-          const pv = s.vertices[s.vertices.length - 2];
-          const pa = Math.atan2(last.y - pv.y, last.x - pv.x);
-          for (let j = 0; j < 4; j++) cands.push(pa + (j * Math.PI) / 2);
-        }
-        let best = null, bd = (4 * Math.PI) / 180;
-        for (const c of cands) {
-          const df = Math.abs(Math.atan2(Math.sin(ang - c), Math.cos(ang - c)));
-          if (df < bd) { bd = df; best = c; }
-        }
-        if (best != null) {
-          const dir = { x: Math.cos(best), y: Math.sin(best) };
-          w = add(last, mul(dir, dot(d, dir)));
-          res.snap = true;
-        }
-        // guia de alinhamento com o primeiro ponto (fecha retângulos)
-        const f = s.vertices[0];
-        if (s.vertices.length >= 2) {
-          if (Math.abs(w.x - f.x) < 10 / k) { w = { x: f.x, y: w.y }; res.guide = [f]; res.snap = true; }
-          else if (Math.abs(w.y - f.y) < 10 / k) { w = { x: w.x, y: f.y }; res.guide = [f]; res.snap = true; }
-        }
+        if (opts.prev) { const pa = Math.atan2(opts.from.y - opts.prev.y, opts.from.x - opts.prev.x); for (let j = 0; j < 4; j++) cands.push(pa + (j * Math.PI) / 2); }
+        let bc = null, ba = (4 * Math.PI) / 180;
+        for (const c of cands) { const df = Math.abs(Math.atan2(Math.sin(ang - c), Math.cos(ang - c))); if (df < ba) { ba = df; bc = c; } }
+        if (bc != null) { dir = { x: Math.cos(bc), y: Math.sin(bc) }; p = add(opts.from, mul(dir, dot(d, dir))); res.kind = 'angle'; }
       }
     }
-    res.w = w;
+    // 3) alinhamento horizontal/vertical com vértices existentes (cruza com a direção travada, se houver)
+    const A = 9 / k;
+    let ax = null, ay = null;
+    for (const o of this.content.shapes) o.vertices.forEach((v, i) => {
+      if (opts.exclude?.has(o.id + ':' + i)) return;
+      if (ax == null && Math.abs(p.x - v.x) < A) ax = v;
+      if (ay == null && Math.abs(p.y - v.y) < A) ay = v;
+    });
+    const tryAlign = (axis, v) => {
+      let q;
+      if (!dir) q = axis === 'x' ? { x: v.x, y: p.y } : { x: p.x, y: v.y };
+      else {
+        const den = axis === 'x' ? dir.x : dir.y;
+        if (Math.abs(den) < 1e-6) return false;
+        const t = axis === 'x' ? (v.x - opts.from.x) / dir.x : (v.y - opts.from.y) / dir.y;
+        q = add(opts.from, mul(dir, t));
+      }
+      if (dist(q, w) > 14 / k) return false;
+      p = q; res.guides.push([v, q]); res.kind = res.kind || 'align';
+      return true;
+    };
+    if (ax) tryAlign('x', ax);
+    if (ay && !(dir && res.guides.length)) tryAlign('y', ay);
+    // 4) extensão de paredes existentes
+    if (!res.guides.length) {
+      for (const o of this.content.shapes) {
+        for (let i = 0, m = segmentCount(o); i < m; i++) {
+          if (o.segments[i].type === 'arc') continue;
+          const [a, b] = [o.vertices[i], o.vertices[(i + 1) % o.vertices.length]];
+          if (opts.exclude?.has(o.id + ':' + i) || opts.exclude?.has(o.id + ':' + ((i + 1) % o.vertices.length))) continue;
+          const u = norm(sub(b, a)), t = dot(sub(p, a), u), L = dist(a, b);
+          if (t > -1e-9 && t < L) continue; // dentro da parede não é "extensão"
+          const q = add(a, mul(u, t));
+          if (dist(q, p) < 8 / k) { p = q; res.guides.push([t < 0 ? a : b, q]); res.kind = res.kind || 'ext'; break; }
+        }
+        if (res.guides.length) break;
+      }
+    }
+    res.w = p;
     return res;
+  }
+
+  // Háptico só ao ENTRAR num encaixe (não a cada movimento).
+  feelSnap(r) {
+    const key = r.target ? r.target.shapeId + ':' + r.target.i : r.close ? 'close' : r.guides.length ? 'g' + r.kind : '';
+    if (key && key !== this.lastSnapKey) haptic();
+    this.lastSnapKey = key;
+  }
+
+  snapPoint(p) {
+    const w = this.toWorld(p);
+    const s = this.drawing && findShape(this.content, this.drawing.shapeId);
+    const n = s ? s.vertices.length : 0;
+    const exclude = new Set(s ? [s.id + ':' + (n - 1)] : []);
+    const r = this.snapWorld(w, { exclude, from: s?.vertices[n - 1], prev: n >= 2 ? s.vertices[n - 2] : null, allowClose: s });
+    this.feelSnap(r);
+    return { w: r.w, snap: !!(r.target || r.guides.length || r.kind), closeHint: r.close, guide: null, target: r.target, guides: r.guides, ring: r.ring };
   }
 
   updatePlace(p) {
     if (!this.drawing) this.drawing = { shapeId: null };
     const r = this.snapPoint(p);
-    Object.assign(this.drawing, { preview: r.w, snap: r.snap, closeHint: r.closeHint, guide: r.guide });
+    Object.assign(this.drawing, { preview: r.w, snap: r.snap, closeHint: r.closeHint, guide: null, target: r.target });
+    this.snap = { guides: r.guides, ring: r.ring };
     this.render();
+  }
+
+  // Ponta de forma aberta? (para emendar formas ao desenhar)
+  isOpenEnd(t) {
+    const o = t && findShape(this.content, t.shapeId);
+    return o && !o.closed && (t.i === 0 || t.i === o.vertices.length - 1);
   }
 
   placePoint() {
@@ -741,7 +836,18 @@ export class Editor {
     if (!d || !d.preview) return;
     const w = d.preview;
     let s = d.shapeId && findShape(this.content, d.shapeId);
+    this.snap = null;
     if (!s) {
+      // Começar em cima da ponta de uma forma aberta = continuar aquela forma.
+      if (this.isOpenEnd(d.target)) {
+        const o = findShape(this.content, d.target.shapeId);
+        if (d.target.i === 0) reverseShape(o);
+        this.drawing = { shapeId: o.id };
+        this.sel = { kind: 'shape', shapeId: o.id };
+        toast('Continuando o contorno existente');
+        this.render();
+        return;
+      }
       s = newShape(w);
       this.content.shapes.push(s);
       this.drawing = { shapeId: s.id };
@@ -755,6 +861,17 @@ export class Editor {
       s.vertices.push({ x: w.x, y: w.y, angleMode: 'auto' });
       s.segments.push({ ...newSegment(this.arcMode ? 'arc' : 'line'), ...(this.arcMode ? { autoBulge: true } : {}) });
       this.drawing = { shapeId: s.id };
+      // Soltou na ponta de OUTRA forma aberta: conecta as duas (vira um contorno só).
+      if (d.target && d.target.shapeId !== s.id && this.isOpenEnd(d.target)) {
+        const r = mergeVertices(this.content, d.target, { shapeId: s.id, i: s.vertices.length - 1 }, 'first');
+        haptic();
+        if (r.shape) {
+          this.drawing = r.shape.closed ? null : { shapeId: r.shape.id };
+          this.sel = { kind: 'shape', shapeId: r.shape.id };
+          if (r.shape.closed) { this.commit(); this.setTool('select'); toast('Contornos unidos e fechados'); return; }
+          toast('Conectado ao contorno existente');
+        }
+      }
     }
     this.commit();
   }
@@ -762,8 +879,10 @@ export class Editor {
   closeDrawing() {
     const s = this.drawing && findShape(this.content, this.drawing.shapeId);
     if (!s || s.vertices.length < 3) return;
-    s.segments.push(newSegment(this.arcMode ? 'arc' : 'line'));
+    s.segments.push({ ...newSegment(this.arcMode ? 'arc' : 'line'), ...(this.arcMode ? { autoBulge: true } : {}) });
     s.closed = true;
+    this.snap = null;
+    haptic();
     // Arcos desenhados no modo Arco: por padrão abaulam para FORA da forma.
     const orient = signedArea(polygonize({ ...s, segments: s.segments.map((g) => ({ ...g, type: 'line' })) })) >= 0 ? 1 : -1;
     for (const g of s.segments) if (g.type === 'arc' && g.autoBulge) { g.bulge = -orient * Math.abs(g.bulge); delete g.autoBulge; }
@@ -805,6 +924,8 @@ export class Editor {
   hitTest(e, w) {
     const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-hit]');
     if (el) return { kind: el.dataset.hit, shapeId: el.dataset.s, i: el.dataset.i != null ? +el.dataset.i : null, textId: el.dataset.t };
+    const ob = objectAt(this.content, w);
+    if (ob) return { kind: 'obj', textId: ob.id };
     const s = shapeAt(this.content, w);
     if (s) return { kind: 'shape', shapeId: s.id };
     const im = this.imageAt(w);
@@ -994,21 +1115,74 @@ export class Editor {
         if (!moved) break;
         const t = g.target;
         const selShape = this.sel?.shapeId;
-        if (t?.kind === 'vertex') { g.type = 'dragVertex'; this.sel = { kind: 'vertex', shapeId: t.shapeId, i: t.i }; this.updateInspector(); }
+        hideContextMenu();
+        if (t?.kind === 'vertex') {
+          g.type = 'dragVertex'; this.sel = { kind: 'vertex', shapeId: t.shapeId, i: t.i }; this.updateInspector();
+          const sh = findShape(this.content, t.shapeId), n = sh.vertices.length;
+          g.lockedBefore = this.adjacentLocked(sh, t.i);
+          this.live = { shapeId: sh.id, segs: [sh.closed ? (t.i - 1 + n) % n : t.i - 1, t.i].filter((x) => x >= 0 && x < segmentCount(sh)) };
+        }
+        else if (t?.kind === 'seg') {
+          // Arrastar a parede: move paralela, puxando os vizinhos.
+          const sh = findShape(this.content, t.shapeId), n = sh.vertices.length;
+          const [a, b] = [sh.vertices[t.i], sh.vertices[(t.i + 1) % n]];
+          const u = norm(sub(b, a));
+          g.type = 'dragWall'; g.w0 = this.toWorld(g.start); g.nrm = { x: -u.y, y: u.x };
+          g.orig = [{ x: a.x, y: a.y }, { x: b.x, y: b.y }];
+          this.sel = { kind: 'seg', shapeId: t.shapeId, i: t.i };
+          this.live = { shapeId: sh.id, segs: [sh.closed ? (t.i - 1 + n) % n : t.i - 1, t.i, (t.i + 1) % (sh.closed ? n : n + 1)].filter((x) => x >= 0 && x < segmentCount(sh)) };
+          this.updateInspector();
+        }
+        else if (t?.kind === 'obj') { g.type = 'dragObj'; this.sel = { kind: 'obj', id: t.textId }; const o = this.content.objects.find((x) => x.id === t.textId); g.off = sub({ x: o.x, y: o.y }, this.toWorld(g.start)); this.updateInspector(); }
+        else if (t?.kind === 'objrot') g.type = 'rotObj';
         else if (t?.kind === 'bulge') g.type = 'dragBulge';
         else if (t?.kind === 'text') { g.type = 'dragText'; this.sel = { kind: 'text', id: t.textId }; this.updateInspector(); g.w0 = w; }
         else if (t?.kind === 'textresize') g.type = 'resizeText';
         else if (t?.kind === 'imgresize') g.type = 'resizeImage';
         else if (t?.kind === 'image' && this.sel?.kind === 'image' && this.sel.id === t.textId) { g.type = 'dragImage'; g.w0 = this.toWorld(g.last); }
-        else if ((t?.kind === 'shape' || t?.kind === 'seg' || t?.kind === 'dim') && t.shapeId === selShape) { g.type = 'dragShape'; g.w0 = this.toWorld(g.last); }
+        else if ((t?.kind === 'shape' || t?.kind === 'dim') && t.shapeId === selShape) { g.type = 'dragShape'; g.w0 = this.toWorld(g.last); }
         else { g.type = 'pan'; g.moved = true; }
         this.onMove(e);
         return;
       }
+      case 'dragWall': {
+        const s = findShape(this.content, g.target.shapeId), n = s.vertices.length;
+        const off = dot(sub(w, g.w0), g.nrm);
+        [s.vertices[g.target.i], s.vertices[(g.target.i + 1) % n]].forEach((v, k2) => { v.x = g.orig[k2].x + g.nrm.x * off; v.y = g.orig[k2].y + g.nrm.y * off; });
+        this.fillsDirty = true;
+        this.render();
+        break;
+      }
+      case 'dragObj': {
+        const o = this.content.objects.find((x) => x.id === g.target.textId);
+        const r = this.snapObject(o, add(w, g.off));
+        o.x = r.x; o.y = r.y; if (r.rot != null) o.rot = r.rot;
+        this.snap = { guides: r.guides, ring: r.ring };
+        this.fillsDirty = true;
+        this.render();
+        break;
+      }
+      case 'rotObj': {
+        const o = this.content.objects.find((x) => x.id === g.target.textId);
+        let a = (Math.atan2(w.y - o.y, w.x - o.x) * 180) / Math.PI + 90;
+        const sn = Math.round(a / 15) * 15;
+        if (Math.abs(a - sn) < 3) a = sn;
+        o.rot = ((a % 180) + 180) % 180;
+        this.fillsDirty = true;
+        this.render();
+        break;
+      }
       case 'dragVertex': {
         const s = findShape(this.content, g.target.shapeId);
         const v = s.vertices[g.target.i];
-        v.x = w.x; v.y = w.y;
+        const n = s.vertices.length;
+        const ex = new Set([s.id + ':' + g.target.i]);
+        const r = this.snapWorld(w, { exclude: ex });
+        this.feelSnap(r);
+        g.snapTarget = r.target;
+        this.snap = { guides: r.guides, ring: r.ring };
+        v.x = r.w.x; v.y = r.w.y;
+        void n;
         this.fillsDirty = true;
         this.render();
         break;
@@ -1087,13 +1261,22 @@ export class Editor {
       case 'moveMarks': this.commit(); break;
       case 'dragImage': case 'resizeImage': this.commit(); break;
       case 'pan': this.saveSoon(); break;
-      case 'press': this.tap(g.target); break;
-      case 'dragVertex': case 'dragBulge': {
+      case 'press': this.tap(g.target, g.w0, e); break;
+      case 'dragVertex': this.dropVertex(g); break;
+      case 'dragWall': {
+        this.live = null;
         const s = findShape(this.content, g.target.shapeId);
         if (hasMeasures(s)) this.solve(s);
         this.commit(); this.updateInspector();
         break;
       }
+      case 'dragBulge': {
+        const s = findShape(this.content, g.target.shapeId);
+        if (hasMeasures(s)) this.solve(s);
+        this.commit(); this.updateInspector();
+        break;
+      }
+      case 'dragObj': case 'rotObj': this.snap = null; this.commit(); this.updateInspector(); break;
       case 'dragShape': case 'dragText': case 'resizeText': this.commit(); break;
     }
   }
@@ -1111,7 +1294,9 @@ export class Editor {
     this.saveSoon();
   }
 
-  tap(t) {
+  tap(t, w, ev) {
+    this.tapWorld = w;
+    this.tapClient = ev ? { x: ev.clientX, y: ev.clientY } : null;
     if (this.tool === 'text') {
       const k = this.view.k;
       const txt = { id: uid(), x: t.w.x, y: t.w.y, w: 220 / k, size: 16 / k, text: 'Anotação' };
@@ -1122,9 +1307,18 @@ export class Editor {
       this.updateInspector({ focus: true });
       return;
     }
+    // "Unir com…": o toque seguinte num vértice completa a união.
+    if (this.pendingMerge) {
+      const A = this.pendingMerge;
+      this.pendingMerge = null;
+      if (t?.kind === 'vertex' && !(t.shapeId === A.shapeId && t.i === A.i)) return this.askMerge(A, { shapeId: t.shapeId, i: t.i });
+      toast('União cancelada');
+    }
     if (!t) this.sel = null;
-    else if (t.kind === 'vertex') this.sel = { kind: 'vertex', shapeId: t.shapeId, i: t.i };
-    else if (t.kind === 'seg' || t.kind === 'dim' || t.kind === 'bulge') this.sel = { kind: 'seg', shapeId: t.shapeId, i: t.i };
+    else if (t.kind === 'vertex') { this.sel = { kind: 'vertex', shapeId: t.shapeId, i: t.i }; this.render(); return this.vertexMenu(t); }
+    else if (t.kind === 'seg') { this.sel = { kind: 'seg', shapeId: t.shapeId, i: t.i, menu: true }; this.render(); return this.wallMenu(t); }
+    else if (t.kind === 'obj' || t.kind === 'objrot') this.sel = { kind: 'obj', id: t.textId };
+    else if (t.kind === 'dim' || t.kind === 'bulge') this.sel = { kind: 'seg', shapeId: t.shapeId, i: t.i };
     else if (t.kind === 'text' || t.kind === 'textresize') this.sel = { kind: 'text', id: t.textId };
     else if (t.kind === 'image' || t.kind === 'imgresize') this.sel = { kind: 'image', id: t.textId };
     else if (t.kind === 'shape') this.sel = { kind: 'shape', shapeId: t.shapeId };
@@ -1180,7 +1374,8 @@ export class Editor {
     this.elLibrary.querySelectorAll('.lib-item').forEach((el) => {
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();
-        const tex = TEXTURES[+el.dataset.tex];
+        const objType = el.dataset.obj;
+        const tex = objType ? null : TEXTURES[+el.dataset.tex];
         const ghost = el.cloneNode(true);
         ghost.classList.add('ghost');
         document.body.appendChild(ghost);
@@ -1196,6 +1391,14 @@ export class Editor {
           el.removeEventListener('pointercancel', up);
           ghost.remove();
           if (ev.type === 'pointercancel') return;
+          if (objType) {
+            const s = this.size();
+            const over = document.elementFromPoint(ev.clientX, ev.clientY);
+            const p = moved && over && this.svg.contains(over) ? { x: ev.clientX - s.left, y: ev.clientY - s.top } : { x: s.w / 2, y: s.h / 2 };
+            if (moved && !(over && this.svg.contains(over))) { toast('Solte a coluna dentro do desenho'); return; }
+            this.placeObject(objType, this.toWorld(p));
+            return;
+          }
           let target = null;
           if (moved) {
             const s = this.size();
@@ -1221,11 +1424,323 @@ export class Editor {
     });
   }
 
+
+  // ---------------- Edição de geometria ----------------
+  menuAt(worldPt) {
+    if (this.tapClient) return this.tapClient;
+    const q = this.toScreen(worldPt), sz = this.size();
+    return { x: q.x + sz.left, y: q.y + sz.top };
+  }
+
+  wallMenu(t) {
+    const shape = findShape(this.content, t.shapeId);
+    const i = t.i, n = shape.vertices.length, m = segmentCount(shape);
+    const seg = shape.segments[i];
+    const hasNext = shape.closed || i < m - 1, hasPrev = shape.closed || i > 0;
+    const tParam = this.tapWorld ? segmentParamAt(shape, i, this.tapWorld) : 0.5;
+    const name = `${vertexLabel(i)}–${vertexLabel((i + 1) % n)}`;
+    const mid = segInfo(shape, i).mid;
+    const at = this.menuAt(mid);
+    showContextMenu(at.x, at.y, [
+      { label: 'Medida', run: () => { this.sel = { kind: 'seg', shapeId: shape.id, i }; this.updateInspector(); this.ensureVisible(); this.render(); } },
+      { label: 'Dividir', sub: [
+        { label: 'Aqui', run: () => this.doSplit(shape, i, tParam) },
+        { label: 'Ao meio', run: () => this.doSplit(shape, i, 0.5) },
+        { label: 'Em N partes…', run: () => this.doSplitN(shape, i) },
+      ] },
+      { label: 'Mesclar', disabled: !(hasNext || hasPrev) || m < 2, sub: [
+        { label: 'Com a parede seguinte', disabled: !hasNext, run: () => this.doMerge(shape, i, 'next') },
+        { label: 'Com a parede anterior', disabled: !hasPrev, run: () => this.doMerge(shape, i, 'prev') },
+      ] },
+      { label: seg.type === 'arc' ? 'Tornar reta' : 'Tornar arco', run: () => {
+        seg.type = seg.type === 'arc' ? 'line' : 'arc';
+        seg.bulge = seg.type === 'arc' ? (seg.bulge || -0.35 * (signedArea(polygonize({ ...shape, segments: shape.segments.map((g) => ({ ...g, type: 'line' })) })) >= 0 ? 1 : -1)) : 0;
+        if (seg.type === 'line') seg.sagitta = null;
+        if (hasMeasures(shape)) this.solve(shape);
+        this.commit();
+      } },
+      { label: 'Excluir', danger: true, run: () => {
+        deleteSegment(this.content, shape, i);
+        this.sel = null; this.recomputeReports(); this.commit(); this.updateInspector();
+        toast(shape.closed ? 'Parede excluída' : 'Parede excluída — contorno aberto');
+      } },
+    ], { title: 'Parede ' + name });
+  }
+
+  vertexMenu(t) {
+    const shape = findShape(this.content, t.shapeId);
+    const n = shape.vertices.length;
+    const isEnd = !shape.closed && (t.i === 0 || t.i === n - 1);
+    const at = this.menuAt(shape.vertices[t.i]);
+    showContextMenu(at.x, at.y, [
+      { label: 'Ângulo…', disabled: interiorAngleDeg(shape, t.i) == null, run: () => { this.sel = { kind: 'vertex', shapeId: shape.id, i: t.i, panel: true }; this.updateInspector(); } },
+      { label: 'Unir com…', run: () => { this.pendingMerge = { shapeId: shape.id, i: t.i }; toast('Toque no outro vértice para unir'); } },
+      ...(isEnd && n >= 3 ? [{ label: 'Fechar contorno', run: () => this.doClose(shape) }] : []),
+      { label: 'Remover vértice', danger: true, disabled: n <= 2, run: () => {
+        removeVertex(this.content, shape, t.i);
+        if (findShape(this.content, shape.id) && hasMeasures(shape)) this.solve(shape);
+        this.sel = null; this.recomputeReports(); this.commit(); this.updateInspector();
+      } },
+    ], { title: 'Vértice ' + vertexLabel(t.i) });
+  }
+
+  doSplit(shape, i, t) {
+    const j = splitSegment(shape, i, t);
+    if (hasMeasures(shape)) this.solve(shape);
+    this.recomputeReports();
+    this.sel = { kind: 'vertex', shapeId: shape.id, i: j };
+    this.commit(); this.updateInspector();
+    haptic();
+    toast('Parede dividida — as duas partes herdaram a medida proporcional');
+  }
+
+  async doSplitN(shape, i) {
+    const v = await ask('Dividir em quantas partes iguais?', '3');
+    const n = Math.round(parseNumber(v));
+    if (!(n >= 2 && n <= 50)) { if (v) toast('Número inválido'); return; }
+    splitSegmentN(shape, i, n);
+    if (hasMeasures(shape)) this.solve(shape);
+    this.recomputeReports();
+    this.sel = { kind: 'shape', shapeId: shape.id };
+    this.commit(); this.updateInspector();
+    toast(`Parede dividida em ${n} partes`);
+  }
+
+  doMerge(shape, i, dir) {
+    const segs = shape.segments, m = segmentCount(shape);
+    const j = dir === 'next' ? (i + 1) % m : (i - 1 + m) % m;
+    const sum = segs[i].length != null && segs[j].length != null ? segs[i].length + segs[j].length : null;
+    const ok = dir === 'next' ? mergeWithNext(this.content, shape, i, sum) : mergeWithPrev(this.content, shape, i, sum);
+    if (!ok) { toast('Não há parede para mesclar desse lado'); return; }
+    const k = dir === 'next' ? (shape.closed ? Math.min(i, segmentCount(shape) - 1) : i) : Math.max(0, i - 1);
+    if (hasMeasures(shape)) this.solve(shape);
+    this.recomputeReports();
+    // Abre o teclado já com a soma: basta confirmar, ou digitar outro valor.
+    this.sel = { kind: 'seg', shapeId: shape.id, i: Math.min(k, segmentCount(shape) - 1) };
+    this.commit(); this.updateInspector();
+    haptic();
+    toast(sum != null ? `Mescladas: ${formatLength(sum, this.content.unit)} (soma)` : 'Paredes mescladas — informe a medida');
+  }
+
+  doClose(shape) {
+    if (!closeShape(shape)) return;
+    if (hasMeasures(shape)) this.solve(shape);
+    this.recomputeReports();
+    this.sel = { kind: 'shape', shapeId: shape.id };
+    this.commit(); this.updateInspector();
+    haptic();
+    toast('Contorno fechado');
+  }
+
+  async askMerge(A, B) {
+    const v = await menu('Unir vértices', [
+      { label: 'Na posição média', value: 'avg' },
+      { label: `Na posição de ${vertexLabel(A.i)} (o primeiro)`, value: 'first' },
+    ]);
+    if (!v) return;
+    this.applyMerge(A, B, v);
+  }
+
+  applyMerge(A, B, mode) {
+    const r = mergeVertices(this.content, A, B, mode);
+    haptic();
+    if (r.shape && hasMeasures(r.shape)) this.solve(r.shape);
+    this.recomputeReports();
+    this.sel = r.shape ? { kind: 'shape', shapeId: r.shape.id } : null;
+    this.commit(); this.updateInspector();
+    toast({ closed: 'Vértices unidos — contorno fechado', 'joined-closed': 'Contornos unidos e fechados', joined: 'Contornos unidos', merged: 'Vértices unidos' }[r.result] || 'Pontos sobrepostos (não são vizinhos no contorno)');
+  }
+
+  // Lados com medida travada que encostam no vértice: {i: comprimento} (para avisar o conflito).
+  adjacentLocked(shape, vi) {
+    const n = shape.vertices.length, out = {};
+    for (const i of [shape.closed ? (vi - 1 + n) % n : vi - 1, vi]) {
+      if (i < 0 || i >= segmentCount(shape)) continue;
+      if (shape.segments[i].length != null) out[i] = shape.segments[i].length;
+    }
+    return out;
+  }
+
+  dropVertex(g) {
+    this.live = null;
+    this.snap = null;
+    const s = findShape(this.content, g.target.shapeId);
+    const t = g.snapTarget;
+    // Soltou em cima de outro vértice: vira um só (fecha contorno / emenda formas).
+    if (t) { this.applyMerge(t, { shapeId: s.id, i: g.target.i }, 'first'); return; }
+    // Medida travada: o solver mantém o comprimento; avisa se o arraste tentou mudar.
+    const n = s.vertices.length, conflicts = [];
+    for (const [i, L] of Object.entries(g.lockedBefore || {})) {
+      const c = dist(s.vertices[+i], s.vertices[(+i + 1) % n]);
+      if (Math.abs(c - L) > lengthTolerance(L)) conflicts.push(`${vertexLabel(+i)}–${vertexLabel((+i + 1) % n)} (${formatLength(L, this.content.unit)})`);
+    }
+    if (hasMeasures(s)) this.solve(s);
+    this.commit(); this.updateInspector();
+    if (conflicts.length) toast(`Medida travada em ${conflicts.join(', ')}: o desenho respeitou a medida. Limpe-a para mudar o comprimento.`, 4200);
+  }
+
+  // Indicador permanente: contorno fechado/aberto e pontos soltos.
+  updateShapeState(selShape) {
+    const el = this.elState;
+    const L = this.loose || { ends: [], pairs: [] };
+    const openShapes = this.content.shapes.filter((x) => !x.closed && x.vertices.length >= 2);
+    let cls = '', txt = '';
+    if (L.pairs.length) { cls = 'warn'; txt = `⚠ ${L.pairs.length} ponto${L.pairs.length > 1 ? 's' : ''} quase junto${L.pairs.length > 1 ? 's' : ''} · Unir`; }
+    else if (selShape) { cls = selShape.closed ? 'ok' : 'open'; txt = selShape.closed ? '● Fechado' : selShape.vertices.length >= 3 ? '○ Aberto · Fechar' : '○ Aberto'; }
+    else if (openShapes.length) { cls = 'open'; txt = `○ ${openShapes.length} contorno${openShapes.length > 1 ? 's' : ''} aberto${openShapes.length > 1 ? 's' : ''}`; }
+    else if (this.content.shapes.length) { cls = 'ok'; txt = '● Tudo fechado'; }
+    el.className = 'shape-state ' + cls + (txt ? '' : ' hidden');
+    el.textContent = txt;
+  }
+
+  stateAction() {
+    const L = this.loose || { ends: [], pairs: [] };
+    if (L.pairs.length) {
+      // Une todos os pares quase sobrepostos, na posição média.
+      let k = 0, guard = 0;
+      while (guard++ < 50) {
+        const p = looseVertices(this.content, 22 / this.view.k).pairs[0];
+        if (!p) break;
+        const r = mergeVertices(this.content, p[0], p[1], 'avg');
+        if (r.result === 'moved') break;
+        k++;
+      }
+      this.recomputeReports();
+      this.commit(); this.updateInspector();
+      haptic();
+      toast(k ? `${k} união(ões) feita(s)` : 'Nada para unir');
+      return;
+    }
+    const sel = this.sel?.shapeId && findShape(this.content, this.sel.shapeId);
+    const target = sel && !sel.closed ? sel : this.content.shapes.find((x) => !x.closed && x.vertices.length >= 3);
+    if (target) this.doClose(target);
+    else if (sel && !sel.closed) toast('Precisa de pelo menos 3 pontos para fechar');
+  }
+
+  setLibraryTab(tab, silent) {
+    this.elLibrary.dataset.tab = tab;
+    this.elLibrary.querySelectorAll('.lib-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.lt === tab));
+    this.elLibrary.querySelector('.lib-sub').textContent = tab === 'objects' ? 'Arraste para dentro do desenho' : 'Arraste para dentro de uma área';
+    // Itens entram em cascata (~30ms).
+    this.elLibrary.querySelectorAll(`.lib-grid.${tab === 'objects' ? 'obj' : 'tex'} .lib-item`).forEach((it, i) => {
+      spring({ from: 0, to: 1, delay: silent ? 0 : i * 30, stiffness: 520, damping: 30, onUpdate: (k) => { it.style.opacity = Math.min(1, k * 1.3); it.style.transform = `translateY(${(1 - k) * 10}px) scale(${0.94 + 0.06 * k})`; } });
+    });
+    if (!silent) { this.settings.libraryTab = tab; saveSettings(this.settings); this.updateToolbar(); }
+  }
+
+  // ---------------- Colunas / objetos ----------------
+  placeObject(type, w) {
+    const o = newObject(type, w, this.content.unit);
+    const r = this.snapObject(o, w);
+    o.x = r.x; o.y = r.y; if (r.rot != null) o.rot = r.rot;
+    this.content.objects.push(o);
+    this.setTool('select');
+    this.sel = { kind: 'obj', id: o.id };
+    this.commit(); this.updateInspector();
+    toast(`${objectType(o).name} inserida — toque para definir as medidas`);
+  }
+
+  // Encaixe de colunas: centro de uma área, cantos, encostada em paredes, alinhada com outras.
+  snapObject(o, w) {
+    const out = { x: w.x, y: w.y, rot: null, guides: [], ring: null };
+    if (this.settings.snap === false) return out;
+    const R = ((this.settings.snapPx || 15) * 1.2) / this.view.k;
+    const T = objectType(o);
+    const half = T.half(o);
+    const closed = this.content.shapes.filter((s) => s.closed && s.vertices.length >= 3);
+    // cantos (por dentro)
+    for (const s of closed) {
+      const n = s.vertices.length;
+      for (let i = 0; i < n; i++) {
+        const v = s.vertices[i], a = s.vertices[(i - 1 + n) % n], b = s.vertices[(i + 1) % n];
+        const u1 = norm(sub(a, v)), u2 = norm(sub(b, v));
+        const c = add(add(v, mul(u1, T.rotatable ? half.h : half.w)), mul(u2, half.w));
+        if (dist(c, w) < R) return { ...out, x: c.x, y: c.y, rot: T.rotatable ? (Math.atan2(u2.y, u2.x) * 180) / Math.PI : null, ring: v };
+      }
+    }
+    // centro de uma área
+    for (const s of closed) {
+      const c = labelPoint(polygonize(s));
+      if (dist(c, w) < R) return { ...out, x: c.x, y: c.y, ring: c };
+    }
+    let p = { ...w };
+    // encostada em parede (pelo lado em que está)
+    for (const s of this.content.shapes) {
+      for (let i = 0, m = segmentCount(s); i < m; i++) {
+        if (s.segments[i].type === 'arc') continue;
+        const a = s.vertices[i], b = s.vertices[(i + 1) % s.vertices.length];
+        const u = norm(sub(b, a)), nrm = { x: -u.y, y: u.x };
+        const t = dot(sub(p, a), u);
+        if (t < 0 || t > dist(a, b)) continue;
+        const d = dot(sub(p, a), nrm), off = T.rotatable ? half.h : half.w;
+        if (Math.abs(Math.abs(d) - off) < R) {
+          const sg = Math.sign(d) || 1;
+          p = add(add(a, mul(u, t)), mul(nrm, sg * off));
+          out.rot = T.rotatable ? (Math.atan2(u.y, u.x) * 180) / Math.PI : null;
+          out.guides.push([a, b]);
+          break;
+        }
+      }
+      if (out.guides.length) break;
+    }
+    // alinhada com outras colunas
+    const A = 9 / this.view.k;
+    for (const q of this.content.objects) {
+      if (q.id === o.id) continue;
+      if (Math.abs(p.x - q.x) < A) { p.x = q.x; out.guides.push([{ x: q.x, y: q.y }, { x: q.x, y: p.y }]); }
+      if (Math.abs(p.y - q.y) < A) { p.y = q.y; out.guides.push([{ x: q.x, y: q.y }, { x: p.x, y: q.y }]); }
+    }
+    out.x = p.x; out.y = p.y;
+    return out;
+  }
+
+  inspectObject(el) {
+    const o = this.content.objects.find((x) => x.id === this.sel.id);
+    const T = objectType(o);
+    const u = this.content.unit;
+    el.innerHTML = `
+      <div class="insp-head"><b>${esc(T.name)}</b><button class="ib sm" data-x="close" aria-label="Fechar">${icon('close')}</button></div>
+      <div class="mpad"></div>
+      ${T.rotatable ? `<label>Rotação <span id="orv">${Math.round(o.rot || 0)}°</span></label><input type="range" id="oro" min="0" max="179" step="1" value="${Math.round(o.rot || 0)}">` : ''}
+      <label class="ios-row plain"><span>Mostrar cotas</span><input type="checkbox" switch data-k="showDims" ${o.showDims ? 'checked' : ''}></label>
+      <label class="ios-row plain"><span>Descontar da área</span><input type="checkbox" switch data-k="subtract" ${o.subtract ? 'checked' : ''}></label>
+      <label>Preenchimento</label><select id="ofill">${TEXTURES.map((t, i) => `<option value="${i}" ${o.fill?.texture === t.key && (o.fill.pattern || null) === (t.pattern || null) ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>
+      <div class="row"><button class="btn" data-x="dup">Duplicar</button><button class="btn danger" data-x="del">Excluir</button></div>
+      <div class="info">Arraste para mover: encaixa em cantos, paredes, centro da área e alinhado com outras colunas.${T.rotatable ? ' Gire pela bolinha acima da coluna.' : ''}</div>`;
+    this.inputUnit ??= u;
+    new MeasurePad(el.querySelector('.mpad'), {
+      fields: T.fields.map((f) => ({ key: f.key, label: f.label, valueM: o.size[f.key] })),
+      unit: this.inputUnit,
+      onUnit: (nu) => { this.inputUnit = nu; },
+      onApply: (vals) => {
+        let any = false;
+        for (const f of T.fields) if (vals[f.key] > 0) { o.size[f.key] = vals[f.key]; any = true; }
+        if (!any) { toast('Digite a medida'); return; }
+        this.commit(); this.updateInspector();
+        toast('Dimensões aplicadas');
+      },
+    });
+    const ro = el.querySelector('#oro');
+    if (ro) {
+      ro.oninput = () => { o.rot = +ro.value; el.querySelector('#orv').textContent = o.rot + '°'; this.fillsDirty = true; this.render(); };
+      ro.onchange = () => this.commit();
+    }
+    el.querySelectorAll('input[data-k]').forEach((c) => (c.onchange = () => { o[c.dataset.k] = c.checked; this.commit(); }));
+    el.querySelector('#ofill').onchange = (e) => { const t = TEXTURES[+e.target.value]; o.fill = { ...defaultFill(t.key, t.pattern), scale: 0.5, joints: false }; this.commit(); };
+    el.querySelector('[data-x=dup]').onclick = () => {
+      const c = { ...structuredClone(o), id: uid(), x: o.x + (Math.max(o.size.w || o.size.d, o.size.h || 0) * 1.6) };
+      this.content.objects.push(c);
+      this.sel = { kind: 'obj', id: c.id };
+      this.commit(); this.updateInspector();
+    };
+    el.querySelector('[data-x=del]').onclick = () => this.deleteSelection();
+  }
+
   // ---------------- Painel de propriedades ----------------
   updateInspector(opts = {}) {
     const el = this.elInspector;
     const s = this.sel;
-    if (!s || (this.tool !== 'select' && s.kind !== 'shape') || (s.kind === 'shape' && this.drawing)) {
+    if (!s || s.menu || (s.kind === 'vertex' && !s.panel) || (this.tool !== 'select' && s.kind !== 'shape') || (s.kind === 'shape' && this.drawing)) {
       if (!el.classList.contains('hidden')) this.animatePanel(el, false);
       return;
     }
@@ -1236,6 +1751,7 @@ export class Editor {
     else if (s.kind === 'shape') this.inspectShape(el);
     else if (s.kind === 'text') this.inspectText(el, opts);
     else if (s.kind === 'image') this.inspectImage(el);
+    else if (s.kind === 'obj') this.inspectObject(el);
     el.querySelector('[data-x=close]')?.addEventListener('click', () => { this.sel = null; this.updateInspector(); this.render(); });
     if (wasHidden || el._anim || (el._k ?? 1) < 1) this.animatePanel(el, true); // reverte um fechamento em andamento
   }
@@ -1308,12 +1824,7 @@ export class Editor {
       if (seg.sagitta != null) seg.sagitta = -seg.sagitta;
       this.commit(); this.updateInspector();
     });
-    el.querySelector('[data-x=split]').onclick = () => {
-      insertVertex(shape, i);
-      this.sel = { kind: 'vertex', shapeId: shape.id, i: i + 1 };
-      this.recomputeReports();
-      this.commit(); this.updateInspector();
-    };
+    el.querySelector('[data-x=split]').onclick = () => this.doSplit(shape, i, 0.5);
   }
 
   inspectImage(el) {
@@ -1387,13 +1898,16 @@ export class Editor {
     el.innerHTML = `
       <div class="insp-head"><b>Área</b><button class="ib sm" data-x="close">${icon('close')}</button></div>
       <label>Nome</label><input id="nm" class="field" placeholder="ex.: Piscina, Pátio, Calçada" value="${esc(shape.name || '')}">
-      ${cal ? `<div class="stats">${shape.closed ? `<div><span>Área</span><b>${formatArea(st.net, u)}</b>${st.net !== st.area ? `<em>bruta ${formatArea(st.area, u)}</em>` : ''}</div>` : ''}<div><span>Perímetro</span><b>${formatLength(st.perimeter, u)}</b></div></div>` : '<div class="info">Sem escala ainda: toque em um lado e informe a medida real.</div>'}
+      <div class="state-line ${shape.closed ? 'ok' : 'open'}">${shape.closed ? '● Contorno fechado' : '○ Contorno aberto — sem área nem textura'}</div>
+      ${cal ? `<div class="stats">${shape.closed ? `<div><span>Área líquida</span><b>${formatArea(st.net, u)}</b></div><div><span>Área bruta</span><b>${formatArea(st.area, u)}</b>${st.objArea ? `<em>colunas −${formatArea(st.objArea, u)}</em>` : ''}</div>` : ''}<div><span>Perímetro</span><b>${formatLength(st.perimeter, u)}</b></div></div>` : '<div class="info">Sem escala ainda: toque em um lado e informe a medida real.</div>'}
       ${shape.closed ? `<label>Acabamento</label>${fillHtml}` : ''}
       <div class="row">
         <button class="btn" data-x="square">Esquadrejar</button>
-        ${!shape.closed && shape.vertices.length >= 3 ? '<button class="btn" data-x="closeShape">Fechar forma</button>' : ''}
+        <button class="btn" data-x="simplify">Simplificar contorno</button>
+        ${!shape.closed && shape.vertices.length >= 3 ? '<button class="btn primary" data-x="closeShape">Fechar contorno</button>' : ''}
         <button class="btn danger" data-x="del">Excluir</button>
-      </div>`;
+      </div>
+      <div class="info">Simplificar remove vértices quase em linha reta (tolerância ${this.settings.simplifyTol}°, ajustável em Configurações).</div>`;
     const nm = el.querySelector('#nm');
     nm.onchange = () => { shape.name = nm.value.trim(); this.commit(); };
     nm.onkeydown = (e) => { if (e.key === 'Enter') nm.blur(); };
@@ -1411,11 +1925,14 @@ export class Editor {
       else { const r = solveShape(shape, { force: true }); shape.vertices = r.vertices; }
       this.commit(); toast('Ângulos e paralelos ajustados');
     };
-    el.querySelector('[data-x=closeShape]')?.addEventListener('click', () => {
-      shape.segments.push(newSegment('line')); shape.closed = true;
+    el.querySelector('[data-x=closeShape]')?.addEventListener('click', () => this.doClose(shape));
+    el.querySelector('[data-x=simplify]').onclick = () => {
+      const n = simplifyShape(this.content, shape, this.settings.simplifyTol || 4);
       if (hasMeasures(shape)) this.solve(shape);
+      this.recomputeReports();
       this.commit(); this.updateInspector();
-    });
+      toast(n ? `${n} vértice(s) removido(s)` : 'Nada a simplificar nessa tolerância');
+    };
     el.querySelector('[data-x=del]').onclick = async () => {
       if (await confirmDialog('Excluir esta área?', '', { okLabel: 'Excluir', danger: true })) this.deleteSelection();
     };

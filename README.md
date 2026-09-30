@@ -36,12 +36,15 @@ e abra `http://localhost:8080`. Testes do solver/unidades: `node tests/solver.te
 | Mão livre | Desenhe o contorno com a Pencil. O app detecta cantos, retas e arcos, fecha a forma e endireita ângulos quase retos. |
 | Formas | Retângulo, quadrado, círculo, piscina oval e forma em L, prontas para medir. |
 | Medir | Ferramenta **Medida**: toque num lado ou numa cota → **teclado numérico grande** (pés + polegadas com ¼ ½ ¾, ou metros) → **Aplicar e próximo** pula para o próximo lado sem medida. Toque de novo no número para editar. |
-| Ângulos | Toque num vértice: **Auto**, **90°**, **Fixo** (ângulo medido) ou **Livre**. |
+| Editar parede | Toque na parede (ferramenta Medida): menu com **Medida**, **Dividir** (aqui / ao meio / em N partes — as partes herdam a medida proporcional), **Mesclar** (com a seguinte/anterior — soma as medidas), **Tornar arco/reta** e **Excluir**. Arraste a parede para movê-la paralela, puxando os vizinhos. Tocar direto no número abre o teclado. |
+| Vértices | Toque no vértice: **Ângulo…** (Auto, 90°, Fixo, Livre), **Unir com…** (toque no outro vértice: posição média ou do primeiro), **Fechar contorno**, **Remover vértice**. Arraste para mover — as medidas aparecem ao vivo; se um lado tem medida travada, o app mantém a medida e avisa. |
+| Pontas soltas | Ao soltar um ponto a ~15 px de outro vértice, eles se conectam (com vibração): fecha o contorno ou emenda duas formas abertas. Pontas abertas e pontos quase juntos ficam com anel **vermelho**. O selo no canto inferior esquerdo mostra **● Fechado / ○ Aberto** e une/fecha com um toque. Também há encaixe em ângulo reto, alinhamento com vértices e extensão de paredes (desligável em Configurações). **Simplificar contorno** remove vértices quase em linha reta. |
+| Colunas | Botão **Objetos** → arraste coluna redonda, quadrada ou retangular para o desenho. Toque nela para digitar diâmetro ou largura × profundidade (na unidade do croqui), girar, mostrar/ocultar cotas, trocar o preenchimento, duplicar ou excluir. Encaixa em cantos, paredes, centro da área e alinhada com outras colunas. **Descontar da área** entra na área líquida (bruta e líquida aparecem no painel e na exportação). Novos tipos (degraus, ralos, canteiros, postes) são uma entrada em `js/objects.js`. |
 | Texturas | Botão Texturas → arraste para dentro de uma área. No painel da área: padrão, cor, escala e rotação. |
 | Anexo | Foto de referência (ex.: do local) por baixo do desenho, com opacidade ajustável, para traçar por cima. |
 | Anotações | Botão **Desenho** abre a paleta vertical da Apple Pencil: caneta, lapiseira, marca-texto, giz, borracha, régua (linha/seta) e laço. Cores 2×3 + seletor; "…" tem espessura, opacidade, mais cores, mostrar/ocultar e apagar tudo. Arraste pela alça; o botão ⤡ recolhe. Fica numa camada separada: nunca vira segmento nem mexe em medidas. |
 | Navegar | Dois dedos: mover e zoom. Com a Pencil detectada, só ela desenha e o dedo navega (Configurações → "Só a Apple Pencil desenha"). |
-| Configurações | Tema Claro / Escuro / Automático, unidade padrão e rejeição de palma. |
+| Configurações | Folha no estilo Ajustes do iOS: tema, grade de pontos, tamanho das cotas, unidade padrão, precisão (1/2"–1/16", 0–3 casas), mostrar área, descontar colunas, encaixe e tolerâncias, rejeição de palma, logo e anotações na exportação. |
 | Exportar | Compartilhar → PNG, PDF ou JSON. PNG/PDF saem **sempre no tema claro**, com logo da Paving Crew, nome do projeto e data no rodapé. |
 
 ## Marca e tema
@@ -85,6 +88,8 @@ croqui/
   js/app.js        rotas, tela de pastas, import/export JSON
   js/editor.js     ferramentas, gestos (Pointer Events), painéis, desfazer/refazer, autosave
   js/palette.js    paleta vertical da Apple Pencil (instrumentos ilustrados)
+  js/objects.js    colunas e registro extensível de objetos
+  js/ctxmenu.js    menu contextual flutuante (paredes, vértices)
   js/markup.js     camada de anotação (caneta, lapiseira, marca-texto, giz, régua/seta, laço)
   js/measure.js    teclado de medidas + canal para medidor externo
   js/motion.js     mola física, toque confiável, háptico
@@ -99,7 +104,7 @@ croqui/
   js/render.js     SVG de tela e de exportação
   js/export.js     PNG e PDF
   js/db.js         IndexedDB
-  tests/solver.test.mjs
+  tests/solver.test.mjs, tests/model.test.mjs   (node tests/…)
 ```
 
 ## Próximos passos sugeridos

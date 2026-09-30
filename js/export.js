@@ -3,7 +3,7 @@ import { buildExportSVG } from './render.js';
 import { logoForExport } from './brand.js';
 
 async function renderCanvas(content, meta) {
-  const logo = await logoForExport();
+  const logo = meta.useLogo === false ? null : await logoForExport();
   const { svg, width, height } = buildExportSVG(content, { ...meta, logo });
   const img = new Image();
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);

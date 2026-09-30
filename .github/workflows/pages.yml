@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: 22
       - run: node tests/solver.test.mjs
+      - run: node tests/model.test.mjs
 
   deploy:
     needs: test

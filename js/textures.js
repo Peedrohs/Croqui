@@ -163,9 +163,11 @@ function body(fill, box, seed, gid) {
       const dots = ['', ''];
       scatter(box, 160 / (s * s), r, (x, y, i) => { dots[i % 2] += circlePath(x, y, (0.004 + r() * 0.008) * s); });
       let j = '';
-      const g = 1.5 * s;
-      for (let x = Math.floor(box.x0 / g) * g; x <= box.x1; x += g) j += `M${f3(x)} ${f3(box.y0)}V${f3(box.y1)}`;
-      for (let y = Math.floor(box.y0 / g) * g; y <= box.y1; y += g) j += `M${f3(box.x0)} ${f3(y)}H${f3(box.x1)}`;
+      const g = fill.joints === false ? Infinity : 1.5 * s;
+      if (isFinite(g)) {
+        for (let x = Math.floor(box.x0 / g) * g; x <= box.x1; x += g) j += `M${f3(x)} ${f3(box.y0)}V${f3(box.y1)}`;
+        for (let y = Math.floor(box.y0 / g) * g; y <= box.y1; y += g) j += `M${f3(box.x0)} ${f3(y)}H${f3(box.x1)}`;
+      }
       return baseRect(box, '#cfccc5') + `<path d="${dots[0]}" fill="#a9a59d" fill-opacity=".6"/><path d="${dots[1]}" fill="#eceae5" fill-opacity=".8"/>` +
         `<path d="${j}" stroke="#9b978f" stroke-width="${f3(0.012 * s)}"/>`;
     }
