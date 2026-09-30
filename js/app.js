@@ -6,13 +6,17 @@ import { Editor } from './editor.js';
 import { ask, confirmDialog, menu, toast, saveFile, pickFile } from './ui.js';
 import { safeName } from './export.js';
 import { installTapReliability } from './motion.js';
+import { initTheme } from './theme.js';
+import { getSettings, openSettings } from './settings.js';
+import { LOGO } from './brand.js';
 
+initTheme();
 installTapReliability();
 
 const root = document.getElementById('app');
 let editor = null;
 
-const newSketchRecord = (folderId, name = 'Croqui 1', unit = 'ft') => ({
+const newSketchRecord = (folderId, name = 'Croqui 1', unit = getSettings().defaultUnit || 'ft') => ({
   id: uid(), folderId, name, createdAt: Date.now(), updatedAt: Date.now(), content: newContent(unit), view: null, thumb: '',
 });
 
@@ -30,12 +34,16 @@ async function showHome() {
   }));
   root.innerHTML = `
   <div class="home">
+    <div class="brandbar">
+      <img class="brand-logo logo-light" src="${LOGO.onLight}" alt="Paving Crew Group"><img class="brand-logo logo-dark" src="${LOGO.onDark}" alt="Paving Crew Group">
+      <button class="ib" data-a="settings" aria-label="Configurações"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.6 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.6-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></button>
+    </div>
     <header class="home-head">
-      <div><h1>Croquis</h1><p>Plantas e medições de campo · tudo salvo neste aparelho</p></div>
+      <div><h1>Projetos</h1><p>Croquis e medições de campo · tudo salvo neste iPad</p></div>
       <div class="home-actions">
         <button class="btn" data-a="import">Importar JSON</button>
         <button class="btn" data-a="backup" ${folders.length ? '' : 'disabled'}>Backup completo</button>
-        <button class="btn primary big" data-a="new">+ Nova pasta</button>
+        <button class="btn primary big" data-a="new">+ Novo projeto</button>
       </div>
     </header>
     ${folders.length ? `<div class="folder-grid">${rows.map(({ f, count, thumb }) => `
@@ -44,7 +52,7 @@ async function showHome() {
         <div class="fc-body"><div><b>${esc(f.name)}</b><small>${count} croqui${count === 1 ? '' : 's'} · ${new Date(f.updatedAt).toLocaleDateString('pt-BR')}</small></div>
         <button class="ib" data-more="${f.id}" aria-label="Opções">⋯</button></div>
       </div>`).join('')}</div>`
-      : `<div class="empty-state"><div class="es-icon">📐</div><h2>Nenhuma pasta ainda</h2><p>Crie uma pasta para cada obra/cliente. Dentro dela ficam os croquis.</p><button class="btn primary big" data-a="new">+ Criar primeira pasta</button></div>`}
+      : `<div class="empty-state"><img class="es-shield" src="${LOGO.shield}" alt=""><h2>Nenhum projeto ainda</h2><p>Crie um projeto para cada obra ou cliente. Dentro dele ficam os croquis.</p><button class="btn primary big" data-a="new">+ Criar primeiro projeto</button></div>`}
   </div>`;
   root.onclick = async (e) => {
     const more = e.target.closest('[data-more]');
@@ -52,8 +60,9 @@ async function showHome() {
     const card = e.target.closest('.folder-card');
     if (card) return openFolder(card.dataset.id);
     const a = e.target.closest('[data-a]')?.dataset.a;
+    if (a === 'settings') return openSettings();
     if (a === 'new') {
-      const name = await ask('Nome da pasta (obra / cliente)', '', { placeholder: 'ex.: Residência Silva — piscina' });
+      const name = await ask('Nome do projeto (obra / cliente)', '', { placeholder: 'ex.: Residência Silva — piscina' });
       if (!name) return;
       const f = { id: uid(), name, createdAt: Date.now(), updatedAt: Date.now(), lastSketchId: null };
       await db.putFolder(f);
@@ -144,6 +153,11 @@ async function openFolder(folderId, sketchId) {
       openFolder(folderId, s.id);
     },
     onRenameSketch: () => {},
+    onDuplicateSketch: async (src) => {
+      const copy = { ...structuredClone(src), id: uid(), name: src.name + ' (cópia)', createdAt: Date.now(), updatedAt: Date.now() };
+      await db.putSketch(copy);
+      openFolder(folderId, copy.id);
+    },
     onDeleteSketch: async (id) => { await db.deleteSketch(id); folder.lastSketchId = null; await db.putFolder(folder); openFolder(folderId); },
     onExportFolder: () => exportFolder(folderId),
   });
@@ -165,3 +179,10 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 requestPersistence();
 route();
+// Splash: some quando o app já desenhou a primeira tela (fade curto).
+requestAnimationFrame(() => setTimeout(() => {
+  const sp = document.getElementById('splash');
+  if (!sp) return;
+  sp.classList.add('out');
+  setTimeout(() => sp.remove(), 450);
+}, 350));

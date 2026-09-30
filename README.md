@@ -30,18 +30,30 @@ e abra `http://localhost:8080`. Testes do solver/unidades: `node tests/solver.te
 
 | Ação | Como |
 |---|---|
-| Ferramentas | Botão redondo flutuante (arraste para onde preferir). Toque para abrir o leque: anel interno = Medir, Pontos, Arco, Mão livre, Texto; anel externo = Caneta, Seta, Borracha, Texturas, Desfazer. Segure o dedo num ícone para ver o nome; toque fora para fechar. |
-| Anotações | **Caneta** (sensível à pressão da Pencil), **Seta** (arraste do início à ponta) e **Borracha** (apaga só traços de anotação). Ficam numa camada separada: não viram segmentos e não mexem em medidas. Cor/espessura na paleta do topo; o olho oculta/mostra a camada (e decide se entra no PNG/PDF). |
-| Ponto a ponto | Ferramenta **Pontos**: toque no ponto A, depois B, C… Tocar no 1º ponto fecha a forma. Encaixa em 0/45/90°, no perpendicular ao lado anterior e no alinhamento com o 1º ponto. Segure e arraste para posicionar antes de soltar. |
-| Arco | Ligue **Arco** antes de marcar o próximo ponto (abaula para fora ao fechar). Ajuste arrastando o losango no meio do arco, ou digite **corda + flecha**. "Inverter arco" troca o lado. |
-| Mão livre | Ferramenta **Mão livre**: desenhe o contorno com a Pencil. O app detecta cantos, retas e arcos, fecha a forma e endireita ângulos quase retos. |
-| Medir | Toque em um lado ou numa cota → digite pés + polegadas (aceita `6 1/2`) ou metros → **Aplicar e próximo** pula para o próximo lado sem medida. |
-| Editar medida | Toque de novo no número. O desenho inteiro se reajusta. |
-| Ângulos | Toque num vértice: **Auto** (padrão), **90°**, **Fixo** (digite o ângulo medido) ou **Livre**. |
-| Texturas | Botão de camadas (canto superior direito) → arraste a textura para dentro de uma área. No painel da área: padrão, cor, escala e rotação. |
-| Texto | Ferramenta **Texto** → toque no croqui. Arraste para mover e use o quadrado azul para mudar a largura; A−/A+ mudam a fonte. |
-| Navegar | Dois dedos: mover e zoom. Com a Apple Pencil detectada, **só a Pencil desenha** e o dedo navega (rejeição de palma). Isso pode ser trocado em Exportar/Opções. |
-| Exportar | Botão compartilhar → PNG, PDF ou o projeto em JSON. Na tela inicial: importar JSON e backup completo. |
+| Barra superior | Cápsulas no estilo Freeform. **Esquerda:** voltar e nome do croqui (renomear, duplicar, exportar, trocar de croqui). **Centro:** Desenho (paleta da Pencil), Ponto a ponto, Mão livre, Medida, Texto · Formas, Texturas, Anexo. **Direita:** desfazer, compartilhar, "…" (configurações, unidade, ajustar à tela, mostrar/ocultar anotações, refazer). |
+| Ponto a ponto | Toque no ponto A, depois B, C… Tocar no 1º ponto fecha a forma. A barra de baixo alterna **Reta / Arco** para o próximo segmento. Encaixa em 0/45/90°, no perpendicular ao lado anterior e no alinhamento com o 1º ponto. |
+| Arco | Arraste o losango no meio do arco, ou digite **corda + flecha**. "Inverter arco" troca o lado. |
+| Mão livre | Desenhe o contorno com a Pencil. O app detecta cantos, retas e arcos, fecha a forma e endireita ângulos quase retos. |
+| Formas | Retângulo, quadrado, círculo, piscina oval e forma em L, prontas para medir. |
+| Medir | Ferramenta **Medida**: toque num lado ou numa cota → **teclado numérico grande** (pés + polegadas com ¼ ½ ¾, ou metros) → **Aplicar e próximo** pula para o próximo lado sem medida. Toque de novo no número para editar. |
+| Ângulos | Toque num vértice: **Auto**, **90°**, **Fixo** (ângulo medido) ou **Livre**. |
+| Texturas | Botão Texturas → arraste para dentro de uma área. No painel da área: padrão, cor, escala e rotação. |
+| Anexo | Foto de referência (ex.: do local) por baixo do desenho, com opacidade ajustável, para traçar por cima. |
+| Anotações | Botão **Desenho** abre a paleta vertical da Apple Pencil: caneta, lapiseira, marca-texto, giz, borracha, régua (linha/seta) e laço. Cores 2×3 + seletor; "…" tem espessura, opacidade, mais cores, mostrar/ocultar e apagar tudo. Arraste pela alça; o botão ⤡ recolhe. Fica numa camada separada: nunca vira segmento nem mexe em medidas. |
+| Navegar | Dois dedos: mover e zoom. Com a Pencil detectada, só ela desenha e o dedo navega (Configurações → "Só a Apple Pencil desenha"). |
+| Configurações | Tema Claro / Escuro / Automático, unidade padrão e rejeição de palma. |
+| Exportar | Compartilhar → PNG, PDF ou JSON. PNG/PDF saem **sempre no tema claro**, com logo da Paving Crew, nome do projeto e data no rodapé. |
+
+## Marca e tema
+
+- Tokens da Paving Crew vêm do repositório **PC-Inventory** (`web/src/styles.css`, `PC Inventory/DesignSystem.swift`, `web/public/brand/`): preto `#0f0f10`, bronze `#b08d57`, creme `#f5f3ee`. Estão em `js/brand.js` e nas variáveis `--pc-*` de `css/app.css`.
+- A marca é **acento**: tela inicial, botão primário, estado ativo, links, ícone, splash e exportação. Barra, paleta da Pencil e painéis ficam neutros (estilo Freeform).
+- Contraste (WCAG AA): o bronze puro dá só 3,09:1 como texto sobre branco, então texto/links usam `#8d7146` (4,58:1) no claro e `#c0a479` (7,15:1) no escuro. Botão primário = bronze com texto preto (6,2:1).
+- Ícones e telas de abertura do iPad (claro/escuro) são gerados por `node tools/gen-assets.mjs`.
+
+## Medida externa (futuro)
+
+O campo de medida é isolado em `js/measure.js`. Uma fonte externa — por exemplo, uma futura versão nativa com a trena Bosch GLM 165-27 CG, já que o Safari do iPadOS não tem Web Bluetooth — só precisa chamar `window.croquiMeasure(metros)`: a medida entra no lado selecionado e o app avança para o próximo.
 
 ## Como funciona a reescala (solver)
 
@@ -72,9 +84,13 @@ croqui/
   css/app.css
   js/app.js        rotas, tela de pastas, import/export JSON
   js/editor.js     ferramentas, gestos (Pointer Events), painéis, desfazer/refazer, autosave
-  js/fan.js        leque radial flutuante (molas, cascata)
-  js/motion.js     mola física, toque instantâneo (pointerdown), háptico
-  js/markup.js     camada de anotação (caneta, seta, borracha)
+  js/palette.js    paleta vertical da Apple Pencil (instrumentos ilustrados)
+  js/markup.js     camada de anotação (caneta, lapiseira, marca-texto, giz, régua/seta, laço)
+  js/measure.js    teclado de medidas + canal para medidor externo
+  js/motion.js     mola física, toque confiável, háptico
+  js/theme.js      tema claro/escuro/automático + paletas do canvas
+  js/settings.js   preferências e tela de Configurações
+  js/brand.js      tokens e logos da Paving Crew
   js/model.js      estrutura de dados, estatísticas (área líquida descontando formas internas)
   js/geometry.js   vetores, arcos (bulge), área, point-in-polygon
   js/solver.js     solver de restrições

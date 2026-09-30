@@ -1,11 +1,12 @@
 // Service worker: cache-first de todo o app → funciona 100% offline depois da 1ª visita.
-const VERSION = 'croqui-v3';
+const VERSION = 'croqui-v4';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/db.js', 'js/editor.js', 'js/export.js', 'js/freehand.js', 'js/geometry.js',
-  'js/model.js', 'js/render.js', 'js/solver.js', 'js/textures.js', 'js/ui.js', 'js/units.js', 'js/util.js',
-  'js/motion.js', 'js/fan.js', 'js/markup.js',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
+  'js/app.js', 'js/brand.js', 'js/db.js', 'js/editor.js', 'js/export.js', 'js/freehand.js', 'js/geometry.js',
+  'js/markup.js', 'js/measure.js', 'js/model.js', 'js/motion.js', 'js/palette.js', 'js/render.js', 'js/settings.js',
+  'js/solver.js', 'js/textures.js', 'js/theme.js', 'js/ui.js', 'js/units.js', 'js/util.js',
+  'brand/logo-on-light.png', 'brand/logo-on-dark.png', 'brand/shield.png',
+  'icons/icon-192.png', 'icons/icon-192-light.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {
