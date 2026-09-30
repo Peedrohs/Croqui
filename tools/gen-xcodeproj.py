@@ -10,7 +10,8 @@ def oid(name):
     return hashlib.md5(('croqui:' + name).encode()).hexdigest()[:24].upper()
 
 def q(s):
-    if s and all(c.isalnum() or c in '._/$()' for c in s) and not s[0].isdigit():
+    # Formato "old-style plist": sem aspas só letras, números e . _ / (parênteses e $ são sintaxe).
+    if s and all((c.isascii() and c.isalnum()) or c in '._/' for c in s) and not s[0].isdigit():
         return s
     return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n') + '"'
 

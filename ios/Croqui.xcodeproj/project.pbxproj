@@ -182,7 +182,7 @@
 				GCC_OPTIMIZATION_LEVEL = "0";
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
-					$(inherited),
+					"$(inherited)",
 				);
 				IPHONEOS_DEPLOYMENT_TARGET = "17.0";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
@@ -230,12 +230,12 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
-					$(inherited),
+					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = "2.0";
 				PRODUCT_BUNDLE_IDENTIFIER = com.pavingcrew.croqui;
-				PRODUCT_NAME = $(TARGET_NAME);
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -262,12 +262,12 @@
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
-					$(inherited),
+					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = "2.0";
 				PRODUCT_BUNDLE_IDENTIFIER = com.pavingcrew.croqui;
-				PRODUCT_NAME = $(TARGET_NAME);
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
