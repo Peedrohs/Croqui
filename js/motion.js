@@ -70,10 +70,45 @@ let pressActive = 0;
 let suppressUntil = 0;
 document.addEventListener('click', (e) => {
   if (hapticLabel && hapticLabel.contains(e.target)) return;
+  if (!e.isTrusted) return; // cliques sintéticos (nossos) sempre passam
   if (pressActive > 0 || performance.now() < suppressUntil) { e.preventDefault(); e.stopPropagation(); }
 }, true);
 
+// ---------- Camada global de toque confiável ----------
+// O `click` nativo do iOS é descartado quando o dedo/Pencil se move alguns pixels entre tocar e
+// soltar, ou quando o contêiner começa a rolar. Aqui, qualquer botão tocado e solto dentro de
+// TAP_SLOP px dispara no pointerup (evento que ainda conta como gesto do usuário — o teclado
+// numérico abre ao focar um campo) e o click nativo que viria depois é engolido.
+const TAP_SLOP = 14;
+const TAPPABLE = 'button, .btn, [role=button], .folder-card, a[href]';
+export function installTapReliability() {
+  const downs = new Map();
+  document.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    const el = e.target.closest?.(TAPPABLE);
+    if (!el || el.disabled || el.closest('[data-fasttap]')) return;
+    // Bloqueia os eventos de mouse de compatibilidade (mousedown pós-toque), que roubariam o foco
+    // do campo de medida que o botão acabou de focar. Rolagem continua valendo (touch-action).
+    e.preventDefault();
+    downs.set(e.pointerId, { el, x: e.clientX, y: e.clientY });
+    el.classList.add('pressed');
+  }, true);
+  const finish = (e, fire) => {
+    const d = downs.get(e.pointerId);
+    if (!d) return;
+    downs.delete(e.pointerId);
+    setTimeout(() => d.el.classList.remove('pressed'), 90);
+    if (!fire || Math.hypot(e.clientX - d.x, e.clientY - d.y) > TAP_SLOP) return;
+    if (d.el.disabled || !d.el.isConnected) return;
+    suppressUntil = performance.now() + 450;
+    d.el.click();
+  };
+  document.addEventListener('pointerup', (e) => finish(e, true), true);
+  document.addEventListener('pointercancel', (e) => finish(e, false), true);
+}
+
 export function onFastTap(container, selector, fn, { haptics = true } = {}) {
+  container.dataset.fasttap = '1';
   container.addEventListener('pointerdown', (e) => {
     if (e.button > 0) return;
     const el = e.target.closest(selector);

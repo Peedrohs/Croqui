@@ -5,6 +5,9 @@ import { newContent } from './model.js';
 import { Editor } from './editor.js';
 import { ask, confirmDialog, menu, toast, saveFile, pickFile } from './ui.js';
 import { safeName } from './export.js';
+import { installTapReliability } from './motion.js';
+
+installTapReliability();
 
 const root = document.getElementById('app');
 let editor = null;

@@ -9,7 +9,11 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); overscroll-behavior: none; }
 body { font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
 #app { height: 100%; }
-button { font: inherit; color: inherit; touch-action: manipulation; cursor: pointer; }
+button, .btn, .chip, .folder-card, .lib-item, select, input, textarea { touch-action: manipulation; }
+button { font: inherit; color: inherit; cursor: pointer; -webkit-user-select: none; user-select: none; }
+.folder-card { transition: transform .12s cubic-bezier(.2,.9,.3,1.3); }
+.folder-card.pressed { transform: scale(.97); }
+.chip.pressed { transform: scale(.94); background-color: var(--accent-soft); }
 button:disabled { opacity: .4; cursor: default; }
 /* Área de toque ≥ 44×44 pt sem mudar o visual: pseudo-elemento invisível ao redor do botão. */
 .ib, .unit-btn, .title-btn, .chip, .sw, .mk-color, .mk-width, .mk-btn, .fan-item, .fab { position: relative; }

@@ -1,5 +1,5 @@
 // Service worker: cache-first de todo o app → funciona 100% offline depois da 1ª visita.
-const VERSION = 'croqui-v2';
+const VERSION = 'croqui-v3';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/db.js', 'js/editor.js', 'js/export.js', 'js/freehand.js', 'js/geometry.js',
