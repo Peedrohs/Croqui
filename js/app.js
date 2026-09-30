@@ -174,7 +174,8 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+// No app nativo os arquivos já vêm no próprio app: sem service worker (evita servir versão velha).
+if ('serviceWorker' in navigator && location.protocol !== 'file:' && !window.__CROQUI_NATIVE__) {
   navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('SW', e));
 }
 requestPersistence();

@@ -1,0 +1,304 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+/* Begin PBXBuildFile section */
+		B69743D27C82C99746288693 /* CroquiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C32F4535C424A0FA33CD7AB4 /* CroquiApp.swift */; };
+		60FDE998723D4EBB1C419DE4 /* CroquiWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 072C5F432DC8944D9A194F9A /* CroquiWebView.swift */; };
+		EEECE969C7B61B0F3E74ECD2 /* NativeBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9B917D6F68E947733B363BA /* NativeBridge.swift */; };
+		8F250ED19E90F5FC176795ED /* LocalServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDEC87F8AE889890E691F06C /* LocalServer.swift */; };
+		DE2AF0FCB6516C6DE0ECFD00 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A54F349AD76B6180AF4474C0 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		57DEDF71957AC9B8AA1759A7 /* Croqui.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Croqui.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C32F4535C424A0FA33CD7AB4 /* CroquiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CroquiApp.swift; sourceTree = "<group>"; };
+		072C5F432DC8944D9A194F9A /* CroquiWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CroquiWebView.swift; sourceTree = "<group>"; };
+		B9B917D6F68E947733B363BA /* NativeBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridge.swift; sourceTree = "<group>"; };
+		EDEC87F8AE889890E691F06C /* LocalServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServer.swift; sourceTree = "<group>"; };
+		A54F349AD76B6180AF4474C0 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C01F3FD2BB660EF35AF5CBDF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E363F25F7E6A7DBFA5042DF6 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		169E970DDA3EF51A1E0D7AB2 = {
+			isa = PBXGroup;
+			children = (
+				E7EC7F29CC66F6D3E0027EF2 /* Croqui */,
+				2F74881B71AFB5868C21E9B1 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2F74881B71AFB5868C21E9B1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				57DEDF71957AC9B8AA1759A7 /* Croqui.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E7EC7F29CC66F6D3E0027EF2 /* Croqui */ = {
+			isa = PBXGroup;
+			children = (
+				C32F4535C424A0FA33CD7AB4 /* CroquiApp.swift */,
+				072C5F432DC8944D9A194F9A /* CroquiWebView.swift */,
+				B9B917D6F68E947733B363BA /* NativeBridge.swift */,
+				EDEC87F8AE889890E691F06C /* LocalServer.swift */,
+				A54F349AD76B6180AF4474C0 /* Assets.xcassets */,
+				C01F3FD2BB660EF35AF5CBDF /* Info.plist */,
+			);
+			path = Croqui;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C774BD16BB1AF118BE3EFF7B /* Croqui */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FB3EE8F167F170E72879C8C1 /* Build configuration list for PBXNativeTarget "Croqui" */;
+			buildPhases = (
+				E9850CC9CC9B7A4043A5B2B3 /* Sources */,
+				E363F25F7E6A7DBFA5042DF6 /* Frameworks */,
+				4A0157198C491A4A5E593223 /* Resources */,
+				78AAEC627DDE192D8A7292E7 /* Copiar app web */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Croqui;
+			productName = Croqui;
+			productReference = 57DEDF71957AC9B8AA1759A7 /* Croqui.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		66BA10AC312E5A8F226E5E3E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					C774BD16BB1AF118BE3EFF7B = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 53645200723DAA9E6A909D6E /* Build configuration list for PBXProject "Croqui" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = "pt-BR";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"pt-BR",
+			);
+			mainGroup = 169E970DDA3EF51A1E0D7AB2;
+			productRefGroup = 2F74881B71AFB5868C21E9B1 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C774BD16BB1AF118BE3EFF7B /* Croqui */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4A0157198C491A4A5E593223 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DE2AF0FCB6516C6DE0ECFD00 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		78AAEC627DDE192D8A7292E7 /* Copiar app web */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copiar app web";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n# Copia o app web (a mesma versão publicada no GitHub Pages) para dentro do app.\nSRC=\"${SRCROOT}/..\"\nDST=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/www\"\nmkdir -p \"$DST\"\nrsync -a --delete \\\n  --include='index.html' --include='manifest.webmanifest' \\\n  --include='css/***' --include='js/***' --include='brand/***' --include='icons/***' \\\n  --exclude='*' \"$SRC/\" \"$DST/\"\necho \"Croqui: app web copiado para $DST\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		E9850CC9CC9B7A4043A5B2B3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B69743D27C82C99746288693 /* CroquiApp.swift in Sources */,
+				60FDE998723D4EBB1C419DE4 /* CroquiWebView.swift in Sources */,
+				EEECE969C7B61B0F3E74ECD2 /* NativeBridge.swift in Sources */,
+				8F250ED19E90F5FC176795ED /* LocalServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		23430B35F69F5D08D6C967FF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = "0";
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					$(inherited),
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = "17.0";
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		594B74314E25FCE837B83D6F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = "17.0";
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A1725E15420912EF1AF8ED82 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "1";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Croqui/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Croqui;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					$(inherited),
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = "2.0";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pavingcrew.croqui;
+				PRODUCT_NAME = $(TARGET_NAME);
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = "5.0";
+				TARGETED_DEVICE_FAMILY = "2";
+			};
+			name = Debug;
+		};
+		E317231E83B8D179C7F4ECFC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = "1";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Croqui/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Croqui;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					$(inherited),
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = "2.0";
+				PRODUCT_BUNDLE_IDENTIFIER = com.pavingcrew.croqui;
+				PRODUCT_NAME = $(TARGET_NAME);
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = "5.0";
+				TARGETED_DEVICE_FAMILY = "2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		53645200723DAA9E6A909D6E /* Build configuration list for PBXProject "Croqui" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				23430B35F69F5D08D6C967FF /* Debug */,
+				594B74314E25FCE837B83D6F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FB3EE8F167F170E72879C8C1 /* Build configuration list for PBXNativeTarget "Croqui" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1725E15420912EF1AF8ED82 /* Debug */,
+				E317231E83B8D179C7F4ECFC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 66BA10AC312E5A8F226E5E3E /* Project object */;
+}

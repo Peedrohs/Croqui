@@ -46,8 +46,11 @@ export function spring({ from, to, velocity = 0, stiffness = 380, damping = 31, 
 // ---------- Háptico ----------
 // Android: navigator.vibrate. iOS 18+: alternar um <input switch> dispara o "tick" do Taptic Engine.
 let hapticLabel = null;
-export function haptic() {
+export function haptic(kind = 'light') {
   try {
+    // App nativo (Xcode): Taptic Engine de verdade.
+    const nb = window.webkit?.messageHandlers?.haptic;
+    if (window.__CROQUI_NATIVE__ && nb) { nb.postMessage(kind); return; }
     if (navigator.vibrate) { navigator.vibrate(8); return; }
     if (!hapticLabel) {
       hapticLabel = document.createElement('label');

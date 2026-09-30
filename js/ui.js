@@ -62,6 +62,13 @@ export function menu(title, items) {
 
 // Salva/compartilha um arquivo (no iPad abre a planilha de compartilhamento → "Salvar em Arquivos").
 export async function saveFile(blob, filename) {
+  // App nativo: planilha de compartilhar do iOS (Salvar em Arquivos, AirDrop, Mail, Fotos…).
+  const nb = window.webkit?.messageHandlers?.share;
+  if (window.__CROQUI_NATIVE__ && nb) {
+    const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+    nb.postMessage({ name: filename, mime: blob.type, base64: b64 });
+    return;
+  }
   const file = new File([blob], filename, { type: blob.type });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file], title: filename }); return; }

@@ -1,0 +1,28 @@
+name: Compilar app iPad (Xcode)
+
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', 'js/**', 'css/**', 'index.html', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Versão do Xcode
+        run: xcodebuild -version
+      - name: Compilar (sem assinatura)
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/Croqui.xcodeproj -scheme Croqui \
+            -configuration Debug -destination 'generic/platform=iOS' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -n 60
+      - name: Conferir app web dentro do app
+        run: |
+          APP=build/Build/Products/Debug-iphoneos/Croqui.app
+          ls "$APP"
+          test -f "$APP/www/index.html"
+          test -f "$APP/www/js/editor.js"
+          echo "OK: $(find "$APP/www" -type f | wc -l) arquivos web no app"
