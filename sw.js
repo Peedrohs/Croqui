@@ -1,8 +1,8 @@
 // Service worker: cache-first de todo o app → funciona 100% offline depois da 1ª visita.
-const VERSION = 'croqui-v5';
+const VERSION = 'croqui-v6';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/brand.js', 'js/db.js', 'js/editor.js', 'js/export.js', 'js/freehand.js', 'js/geometry.js',
+  'js/app.js', 'js/areas.js', 'js/brand.js', 'js/db.js', 'js/editor.js', 'js/export.js', 'js/freehand.js', 'js/geometry.js',
   'js/ctxmenu.js', 'js/markup.js', 'js/measure.js', 'js/objects.js', 'js/model.js', 'js/motion.js', 'js/palette.js', 'js/render.js', 'js/settings.js',
   'js/solver.js', 'js/textures.js', 'js/theme.js', 'js/ui.js', 'js/units.js', 'js/util.js',
   'brand/logo-on-light.png', 'brand/logo-on-dark.png', 'brand/shield.png',
