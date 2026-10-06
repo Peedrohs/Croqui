@@ -23,8 +23,9 @@ const fmtM = (v) => String(Math.round(v * 1000) / 1000).replace('.', ',');
  * onApply({ [key]: meters|NaN }, { next }) ; onUnit(unit)
  */
 export class MeasurePad {
-  constructor(el, { fields, unit, onApply, onUnit, focus = true }) {
+  constructor(el, { fields, unit, onApply, onUnit, focus = true, next = true }) {
     this.el = el;
+    this.hasNext = next;
     this.fields = fields;
     this.unit = unit;
     this.onApply = onApply;
@@ -71,7 +72,7 @@ export class MeasurePad {
       ${this.fields.map((f) => `<label class="mp-label">${esc(f.label)}</label><div class="mp-row">${row(f)}</div>`).join('')}
       <div class="mp-units"><button class="chip ${u === 'ft' ? 'on' : ''}" data-u="ft">pés / pol</button><button class="chip ${u === 'm' ? 'on' : ''}" data-u="m">metros</button></div>
       <div class="mp-keys">${keys.map((k) => (k ? `<button class="mp-key ${/[0-9]/.test(k) && k.length === 1 ? '' : 'fn'}" data-k="${k}" aria-label="${k === '⌫' ? 'Apagar' : k === '→' ? 'Próximo campo' : k}">${k}</button>` : '<span></span>')).join('')}</div>
-      <div class="row"><button class="btn primary big" data-x="apply">Aplicar</button><button class="btn big" data-x="next">Aplicar e próximo →</button></div>`;
+      <div class="row"><button class="btn primary big" data-x="apply">Aplicar</button>${this.hasNext ? '<button class="btn big" data-x="next">Aplicar e próximo →</button>' : ''}</div>`;
   }
 
   press(b) {

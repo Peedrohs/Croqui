@@ -1,7 +1,7 @@
 // Montagem do SVG. Texturas em coordenadas do mundo (um <g> com transform);
 // linhas, cotas e textos em coordenadas de tela, para ficarem nítidos em qualquer zoom.
 import { f1, esc, vertexLabel } from './util.js';
-import { polygonize, segmentCount, segInfo, orientation, sub, add, mul, norm, labelPoint, shapeArea } from './geometry.js';
+import { polygonize, segmentCount, segInfo, orientation, sub, add, mul, norm, labelPoint, shapeArea, expandFillets, filletInfo } from './geometry.js';
 import { formatLength, formatArea, M_PER_FT } from './units.js';
 import { renderFill } from './textures.js';
 import { rightAngleVertices } from './solver.js';
@@ -85,7 +85,14 @@ function segPath(shape, i, v, move = true) {
   return d;
 }
 
+// Trecho visível do segmento i (com cantos arredondados, a parede reta fica mais curta).
+function visSegPath(shape, i, v) {
+  const ex = expandFillets(shape);
+  return ex === shape ? segPath(shape, i, v) : segPath(ex, ex.map[i], v);
+}
+
 export function shapePath(shape, v) {
+  shape = expandFillets(shape);
   const m = segmentCount(shape);
   if (!m) return '';
   let d = '';
@@ -156,6 +163,19 @@ function dims(content, shape, v, report, opts) {
       if (ftxt) out += label(P.x, P.y, ang, ftxt, { color: seg.sagitta != null ? C.measured : C.approx, weight: 500, px: px - 2, hit });
     }
   }
+  // Cantos arredondados: raio + comprimento do arco, do lado de fora do canto.
+  const ex = expandFillets(shape);
+  for (const a of ex.arcs || []) {
+    const f = a.info;
+    const M = S(sub(f.center, mul(f.bis, f.r)), v);
+    if (f.r * v.k < 4) continue;
+    const txt = content.calibrated ? `R ${formatLength(f.r, unit)} · ⌒ ${formatLength(f.length, unit)}` : 'R ?';
+    // Por dentro do arco (fora ficam as cotas das paredes); conta a largura do texto.
+    const half = (textWidth(txt, px - 1) + 10) / 2;
+    const P = add(M, mul(f.bis, (opts.export ? 30 : 20) + half * Math.abs(f.bis.x)));
+    const hit = opts.export ? '' : `data-hit="fillet" data-s="${shape.id}" data-i="${f.i}"`;
+    out += label(P.x, P.y, 0, txt, { color: f.clamped ? C.bad : C.measured, weight: 600, px: px - 1, hit });
+  }
   return out;
 }
 
@@ -163,6 +183,7 @@ function rightMarks(shape, v, big) {
   const n = shape.vertices.length;
   let d = '';
   for (const i of rightAngleVertices(shape)) {
+    if (filletInfo(shape, i)) continue;
     const a = S(shape.vertices[(i - 1 + n) % n], v), b = S(shape.vertices[i], v), c = S(shape.vertices[(i + 1) % n], v);
     const u = norm(sub(a, b)), w = norm(sub(c, b));
     const s = big ? 16 : 9;
@@ -224,18 +245,25 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
     const report = ui.reports?.[s.id];
     o += `<path d="${d}" fill="none" stroke="${isSel ? C.accent : C.ink}" stroke-width="${opts.export ? 3 : 2.5}" stroke-linejoin="round" stroke-linecap="round"/>`;
     if (report?.badSegments?.length && !opts.export) {
-      for (const i of report.badSegments) o += `<path d="${segPath(s, i, v)}" fill="none" stroke="${C.bad}" stroke-width="4" stroke-linecap="round"/>`;
+      for (const i of report.badSegments) o += `<path d="${visSegPath(s, i, v)}" fill="none" stroke="${C.bad}" stroke-width="4" stroke-linecap="round"/>`;
     }
     if (!opts.export) {
       for (let i = 0, m = segmentCount(s); i < m; i++) {
         const segSel = ui.sel?.kind === 'seg' && ui.sel.shapeId === s.id && ui.sel.i === i;
         if (segSel) {
           const [e0, e1] = [S(s.vertices[i], v), S(s.vertices[(i + 1) % s.vertices.length], v)];
-          o += `<path d="${segPath(s, i, v)}" fill="none" stroke="${C.accentFill}" stroke-width="9" stroke-linecap="round" opacity=".35"/>` +
-            `<path d="${segPath(s, i, v)}" fill="none" stroke="${C.accent}" stroke-width="3.5" stroke-linecap="round"/>` +
+          o += `<path d="${visSegPath(s, i, v)}" fill="none" stroke="${C.accentFill}" stroke-width="9" stroke-linecap="round" opacity=".35"/>` +
+            `<path d="${visSegPath(s, i, v)}" fill="none" stroke="${C.accent}" stroke-width="3.5" stroke-linecap="round"/>` +
             [e0, e1].map((q) => `<circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="11" fill="${C.accentFill}" fill-opacity=".25"/><circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="6.5" fill="${C.accent}" stroke="${C.handle}" stroke-width="2.5"/>`).join('');
         }
-        o += `<path d="${segPath(s, i, v)}" fill="none" stroke="transparent" stroke-width="28" data-hit="seg" data-s="${s.id}" data-i="${i}"/>`;
+        o += `<path d="${visSegPath(s, i, v)}" fill="none" stroke="transparent" stroke-width="28" data-hit="seg" data-s="${s.id}" data-i="${i}"/>`;
+      }
+      const ex = expandFillets(s);
+      for (const a of ex.arcs || []) {
+        const fSel = ui.sel?.kind === 'fillet' && ui.sel.shapeId === s.id && ui.sel.i === a.vertex;
+        const pth = segPath(ex, a.seg, v);
+        if (fSel) o += `<path d="${pth}" fill="none" stroke="${C.accentFill}" stroke-width="9" stroke-linecap="round" opacity=".35"/><path d="${pth}" fill="none" stroke="${C.accent}" stroke-width="3.5" stroke-linecap="round"/>`;
+        o += `<path d="${pth}" fill="none" stroke="transparent" stroke-width="28" data-hit="fillet" data-s="${s.id}" data-i="${a.vertex}"/>`;
       }
     }
     o += rightMarks(s, v, opts.export);
@@ -262,6 +290,12 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
         if (s.id === selShape) o += `<text x="${f1(q.x + 10)}" y="${f1(q.y - 10)}" font-size="12" font-weight="700" fill="${C.accent}" style="paint-order:stroke" stroke="${C.halo}" stroke-width="3">${vertexLabel(i)}</text>`;
       });
       if (s.id === selShape) {
+        // Canto arredondado: canto "vivo" pontilhado + alça redonda no meio do arco (arraste = raio).
+        for (const a of expandFillets(s).arcs || []) {
+          const f = a.info, cq = S(s.vertices[f.i], v), t1 = S(f.T1, v), t2 = S(f.T2, v), q = S(sub(f.center, mul(f.bis, f.r)), v);
+          o += `<path d="M${f1(t1.x)} ${f1(t1.y)}L${f1(cq.x)} ${f1(cq.y)}L${f1(t2.x)} ${f1(t2.y)}" fill="none" stroke="${C.accent}" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>` +
+            `<g data-hit="fillet" data-s="${s.id}" data-i="${f.i}"><circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="20" fill="transparent"/><circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="6.5" fill="${C.handle}" stroke="${C.accent}" stroke-width="2.5"/></g>`;
+        }
         for (let i = 0, m = segmentCount(s); i < m; i++) {
           const info = segInfo(s, i);
           if (!info.arc) continue;

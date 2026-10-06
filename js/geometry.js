@@ -56,11 +56,70 @@ export function segPoints(shape, i, step = Math.PI / 24) {
 }
 
 export function polygonize(shape, step) {
+  const sh = expandFillets(shape);
   const pts = [];
-  const m = segmentCount(shape);
-  for (let i = 0; i < m; i++) pts.push(...segPoints(shape, i, step));
-  if (!shape.closed && shape.vertices.length) pts.push(shape.vertices[shape.vertices.length - 1]);
+  const m = segmentCount(sh);
+  for (let i = 0; i < m; i++) pts.push(...segPoints(sh, i, step));
+  if (!sh.closed && sh.vertices.length) pts.push(sh.vertices[sh.vertices.length - 1]);
   return pts;
+}
+
+// ---------- Canto arredondado (fillet) ----------
+// O raio fica no próprio vértice (v.fillet, em m): o solver continua trabalhando com os cantos
+// "vivos" (medidas de canto a canto) e o arco é sempre tangente às duas paredes retas.
+// filletInfo devolve null se o canto não pode ser arredondado (ponta, parede em arco, ~180°).
+export function filletInfo(shape, i) {
+  const v = shape.vertices[i];
+  if (!v || !(v.fillet > 0)) return null;
+  const n = shape.vertices.length;
+  if (n < 3 || (!shape.closed && (i === 0 || i === n - 1))) return null;
+  const ip = (i - 1 + n) % n, sp = shape.closed ? ip : i - 1;
+  const segIn = shape.segments[sp], segOut = shape.segments[i];
+  if (!segIn || !segOut || segIn.type === 'arc' || segOut.type === 'arc') return null;
+  const a = shape.vertices[ip], c = shape.vertices[(i + 1) % n];
+  const l1 = dist(a, v), l2 = dist(c, v);
+  if (l1 < 1e-9 || l2 < 1e-9) return null;
+  const u1 = { x: (a.x - v.x) / l1, y: (a.y - v.y) / l1 }, u2 = { x: (c.x - v.x) / l2, y: (c.y - v.y) / l2 };
+  const alpha = Math.acos(Math.max(-1, Math.min(1, dot(u1, u2)))); // ângulo interno do canto
+  if (alpha < 1e-3 || alpha > Math.PI - 2e-3) return null;
+  const tanH = Math.tan(alpha / 2);
+  // Paredes vizinhas também arredondadas dividem o comprimento ao meio.
+  const share = (j) => (shape.vertices[j]?.fillet > 0 && (shape.closed || (j > 0 && j < n - 1)) ? 0.5 : 0.98);
+  const tMax = Math.min(l1 * share(ip), l2 * share((i + 1) % n));
+  const t = Math.min(v.fillet / tanH, tMax);
+  const r = t * tanH;
+  const T1 = add(v, mul(u1, t)), T2 = add(v, mul(u2, t));
+  const phi = Math.PI - alpha; // quanto o arco gira
+  const d = sub(T2, T1), c0 = len(d);
+  const nrm = { x: -d.y / (c0 || 1), y: d.x / (c0 || 1) };
+  const toCorner = dot(sub(v, lerp(T1, T2, 0.5)), nrm);
+  const bulge = Math.sign(toCorner || 1) * Math.tan(phi / 4);
+  const bis = norm(add(u1, u2));
+  const C = add(v, mul(bis, r / Math.sin(alpha / 2)));
+  return { i, T1, T2, t, r, clamped: t < v.fillet / tanH - 1e-9, alpha, phi, bulge, length: r * phi, center: C, bis, tMax, rMax: tMax * tanH };
+}
+
+export const hasFillets = (shape) => shape.vertices.some((v) => v.fillet > 0);
+
+// Forma "desenhável": cada canto arredondado vira T1 → arco → T2. map[i] = índice do segmento i
+// original na forma expandida; arcs = [{ vertex, seg }] (os arcos dos cantos).
+export function expandFillets(shape) {
+  if (!hasFillets(shape)) return shape;
+  const n = shape.vertices.length, m = segmentCount(shape);
+  const F = shape.vertices.map((_, i) => filletInfo(shape, i));
+  if (!F.some(Boolean)) return shape;
+  const vertices = [], segments = [], map = [], arcs = [];
+  for (let i = 0; i < n; i++) {
+    const f = F[i];
+    if (f) {
+      vertices.push({ x: f.T1.x, y: f.T1.y });
+      arcs.push({ vertex: i, seg: segments.length, info: f });
+      segments.push({ type: 'arc', bulge: f.bulge, length: null, sagitta: null, fillet: true });
+      vertices.push({ x: f.T2.x, y: f.T2.y });
+    } else vertices.push({ ...shape.vertices[i] });
+    if (i < m) { map[i] = segments.length; segments.push({ ...shape.segments[i] }); }
+  }
+  return { ...shape, vertices, segments, map, arcs, expanded: true };
 }
 
 export function signedArea(pts) {
@@ -78,8 +137,9 @@ export function shapeArea(shape) {
 }
 
 export function shapePerimeter(shape) {
+  const sh = expandFillets(shape);
   let p = 0;
-  for (let i = 0, m = segmentCount(shape); i < m; i++) p += segInfo(shape, i).length;
+  for (let i = 0, m = segmentCount(sh); i < m; i++) p += segInfo(sh, i).length;
   return p;
 }
 

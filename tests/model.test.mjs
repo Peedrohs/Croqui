@@ -80,3 +80,24 @@ const rect = () => { const s = newShape({ x: 0, y: 0 }); s.vertices = [[0, 0], [
   { const c = newContent('m'); const a = rect(); const b = rect(); b.vertices.forEach((v) => { v.x += 10.05; }); c.shapes.push(a, b);
     assert.equal(joinClusters(c, 0.2).length, 0); console.log('ok áreas independentes'); }
 }
+
+// ---- Arredondar canto (fillet) ----
+{ const { filletInfo, shapePerimeter } = await import('../js/geometry.js');
+  for (const flip of [false, true]) {
+    const c = newContent('m'); const s = rect(); if (flip) { s.vertices.reverse(); } c.shapes.push(s);
+    const i = flip ? 2 : 1; // canto (10,0)
+    s.vertices[i].fillet = 1;
+    const f = filletInfo(s, i);
+    near(f.r, 1, 1e-9); near(f.t, 1, 1e-9); near(f.length, Math.PI / 2, 1e-9);
+    near(f.center.x, 9, 1e-9); near(f.center.y, 1, 1e-9);
+    near(shapeArea(s), 50 - (1 - Math.PI / 4), 2e-3);
+    near(shapePerimeter(s), 30 - 2 + Math.PI / 2, 1e-6);
+    // continua com o canto arredondado depois de resolver medidas (raio preservado, tangente)
+    s.segments[0].length = 12; solveInContent(c, s);
+    near(filletInfo(s, i).r, 1, 1e-9); assert.equal(s.vertices[i].fillet, 1);
+    // raio grande demais: limita ao que cabe na parede
+    s.vertices[i].fillet = 50; assert.ok(filletInfo(s, i).clamped);
+    delete s.vertices[i].fillet; near(shapeArea(s), 72, 0.05); // 1ª medida reescala tudo (12×6)
+  }
+  console.log('ok fillet');
+}

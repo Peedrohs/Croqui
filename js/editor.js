@@ -1,7 +1,7 @@
 // Editor de croqui: ferramentas, gestos, painéis, histórico e salvamento automático.
 import { db } from './db.js';
 import { uid, clamp, debounce, esc, vertexLabel, deepClone } from './util.js';
-import { dist, sub, add, mul, dot, segInfo, segmentCount, polygonize, interiorAngleDeg, signedArea } from './geometry.js';
+import { dist, sub, add, mul, dot, segInfo, segmentCount, polygonize, interiorAngleDeg, signedArea, filletInfo } from './geometry.js';
 import { formatLength, formatArea, parseNumber } from './units.js';
 import { solveShape } from './solver.js';
 import { recognizeStroke } from './freehand.js';
@@ -481,6 +481,7 @@ export class Editor {
     if (!sh) return false;
     if (s.kind === 'seg') return s.i < segmentCount(sh);
     if (s.kind === 'vertex') return s.i < sh.vertices.length;
+    if (s.kind === 'fillet') return !!filletInfo(sh, s.i);
     return true;
   }
 
@@ -1033,7 +1034,7 @@ export class Editor {
     this.lasso = null;
     if (g?.type === 'free') this.freehand = null;
     if (g?.type === 'place' && this.drawing) this.drawing.preview = null;
-    if (g && (['dragVertex', 'dragBulge', 'dragShape', 'dragText', 'resizeText', 'dragImage', 'resizeImage', 'moveMarks'].includes(g.type) || (g.type === 'erase' && g.removed))) this.restore(this.lastSnap);
+    if (g && (['dragVertex', 'dragBulge', 'dragFillet', 'dragShape', 'dragText', 'resizeText', 'dragImage', 'resizeImage', 'moveMarks'].includes(g.type) || (g.type === 'erase' && g.removed))) this.restore(this.lastSnap);
     this.render();
   }
 
@@ -1044,7 +1045,7 @@ export class Editor {
     if (this.gesture?.type === 'erase') { this.eraserPos = null; if (this.gesture.removed) this.restore(this.lastSnap); }
     if (this.gesture?.type === 'place' && this.drawing) this.drawing.preview = null;
     if (this.gesture?.type === 'free') this.freehand = null;
-    if (this.gesture && ['dragVertex', 'dragBulge', 'dragShape', 'dragText', 'resizeText', 'dragImage', 'resizeImage'].includes(this.gesture.type)) this.restore(this.lastSnap);
+    if (this.gesture && ['dragVertex', 'dragBulge', 'dragFillet', 'dragShape', 'dragText', 'resizeText', 'dragImage', 'resizeImage'].includes(this.gesture.type)) this.restore(this.lastSnap);
     const [a, b] = this.touches();
     this.gesture = {
       type: 'pinch', view0: { ...this.view },
@@ -1166,6 +1167,7 @@ export class Editor {
         else if (t?.kind === 'obj') { g.type = 'dragObj'; this.sel = { kind: 'obj', id: t.textId }; const o = this.content.objects.find((x) => x.id === t.textId); g.off = sub({ x: o.x, y: o.y }, this.toWorld(g.start)); this.updateInspector(); }
         else if (t?.kind === 'objrot') g.type = 'rotObj';
         else if (t?.kind === 'bulge') g.type = 'dragBulge';
+        else if (t?.kind === 'fillet') { g.type = 'dragFillet'; this.sel = { kind: 'fillet', shapeId: t.shapeId, i: t.i }; this.updateInspector(); }
         else if (t?.kind === 'text') { g.type = 'dragText'; this.sel = { kind: 'text', id: t.textId }; this.updateInspector(); g.w0 = w; }
         else if (t?.kind === 'textresize') g.type = 'resizeText';
         else if (t?.kind === 'imgresize') g.type = 'resizeImage';
@@ -1213,6 +1215,19 @@ export class Editor {
         this.snap = { guides: r.guides, ring: r.ring };
         v.x = r.w.x; v.y = r.w.y;
         void n;
+        this.fillsDirty = true;
+        this.render();
+        break;
+      }
+      case 'dragFillet': {
+        // Arrastar a alça do arco ao longo da bissetriz muda o raio.
+        const s = findShape(this.content, g.target.shapeId);
+        const vx = s.vertices[g.target.i];
+        const f = filletInfo(s, g.target.i);
+        if (!f) break;
+        const dd = dot(sub(w, vx), f.bis);
+        const k = 1 / Math.sin(f.alpha / 2) - 1;
+        vx.fillet = clamp(dd / (k || 1e-9), f.rMax * 0.02, f.rMax);
         this.fillsDirty = true;
         this.render();
         break;
@@ -1300,6 +1315,7 @@ export class Editor {
         this.commit(); this.updateInspector();
         break;
       }
+      case 'dragFillet': this.commit(); this.updateInspector(); break;
       case 'dragBulge': {
         const s = findShape(this.content, g.target.shapeId);
         if (hasMeasures(s)) this.solve(s);
@@ -1350,6 +1366,7 @@ export class Editor {
     else if (t.kind === 'seg') { this.sel = { kind: 'seg', shapeId: t.shapeId, i: t.i, menu: true }; this.render(); return this.wallMenu(t); }
     else if (t.kind === 'obj' || t.kind === 'objrot') this.sel = { kind: 'obj', id: t.textId };
     else if (t.kind === 'dim' || t.kind === 'bulge') this.sel = { kind: 'seg', shapeId: t.shapeId, i: t.i };
+    else if (t.kind === 'fillet') this.sel = { kind: 'fillet', shapeId: t.shapeId, i: t.i };
     else if (t.kind === 'text' || t.kind === 'textresize') this.sel = { kind: 'text', id: t.textId };
     else if (t.kind === 'image' || t.kind === 'imgresize') this.sel = { kind: 'image', id: t.textId };
     else if (t.kind === 'shape') this.sel = { kind: 'shape', shapeId: t.shapeId };
@@ -1483,6 +1500,10 @@ export class Editor {
         { label: 'Com a parede seguinte', disabled: !hasNext, run: () => this.doMerge(shape, i, 'next') },
         { label: 'Com a parede anterior', disabled: !hasPrev, run: () => this.doMerge(shape, i, 'prev') },
       ] },
+      { label: 'Arredondar canto', disabled: !this.canFillet(shape, i) && !this.canFillet(shape, (i + 1) % n), sub: [
+        { label: `No canto ${vertexLabel(i)}`, disabled: !this.canFillet(shape, i), run: () => this.doFillet(shape, i) },
+        { label: `No canto ${vertexLabel((i + 1) % n)}`, disabled: !this.canFillet(shape, (i + 1) % n), run: () => this.doFillet(shape, (i + 1) % n) },
+      ] },
       { label: seg.type === 'arc' ? 'Tornar reta' : 'Tornar arco', run: () => {
         seg.type = seg.type === 'arc' ? 'line' : 'arc';
         seg.bulge = seg.type === 'arc' ? (seg.bulge || -0.35 * (signedArea(polygonize({ ...shape, segments: shape.segments.map((g) => ({ ...g, type: 'line' })) })) >= 0 ? 1 : -1)) : 0;
@@ -1505,6 +1526,9 @@ export class Editor {
     const at = this.menuAt(shape.vertices[t.i]);
     showContextMenu(at.x, at.y, [
       { label: 'Ângulo…', disabled: interiorAngleDeg(shape, t.i) == null, run: () => { this.sel = { kind: 'vertex', shapeId: shape.id, i: t.i, panel: true }; this.updateInspector(); } },
+      ...(shape.vertices[t.i].fillet > 0 && filletInfo(shape, t.i)
+        ? [{ label: 'Raio do canto…', run: () => this.doFillet(shape, t.i) }, { label: 'Canto vivo', run: () => this.unFillet(shape, t.i) }]
+        : [{ label: 'Arredondar canto', disabled: !this.canFillet(shape, t.i), run: () => this.doFillet(shape, t.i) }]),
       { label: 'Unir com…', run: () => { this.pendingMerge = { shapeId: shape.id, i: t.i }; toast('Toque no outro vértice para unir'); } },
       ...(isEnd && n >= 3 ? [{ label: 'Fechar contorno', run: () => this.doClose(shape) }] : []),
       { label: 'Remover vértice', danger: true, disabled: n <= 2, run: () => {
@@ -1513,6 +1537,67 @@ export class Editor {
         this.sel = null; this.recomputeReports(); this.commit(); this.updateInspector();
       } },
     ], { title: 'Vértice ' + vertexLabel(t.i) });
+  }
+
+  // ---------- Arredondar canto (3.6) ----------
+  canFillet(shape, i) {
+    const v = shape.vertices[i];
+    if (!v) return false;
+    const old = v.fillet;
+    v.fillet = 1e-6;
+    const ok = !!filletInfo(shape, i);
+    if (old === undefined) delete v.fillet; else v.fillet = old;
+    return ok;
+  }
+
+  doFillet(shape, i) {
+    if (!this.canFillet(shape, i)) { toast('Só dá para arredondar um canto entre duas paredes retas'); return; }
+    const v = shape.vertices[i];
+    if (!(v.fillet > 0)) {
+      v.fillet = 1e9;
+      const rMax = filletInfo(shape, i).rMax;
+      const nice = this.content.unit === 'ft' ? 2 * 0.3048 : 0.5;
+      v.fillet = this.content.calibrated ? Math.min(nice, rMax * 0.6) : rMax * 0.3;
+      this.commit();
+      haptic();
+    }
+    this.sel = { kind: 'fillet', shapeId: shape.id, i };
+    this.updateInspector({ focus: true });
+    this.ensureVisible();
+    this.render();
+  }
+
+  unFillet(shape, i) {
+    delete shape.vertices[i].fillet;
+    this.sel = { kind: 'vertex', shapeId: shape.id, i };
+    this.commit(); this.updateInspector();
+    toast(`Canto ${vertexLabel(i)} voltou a ser vivo`);
+  }
+
+  inspectFillet(el) {
+    const shape = findShape(this.content, this.sel.shapeId);
+    const i = this.sel.i;
+    const v = shape.vertices[i];
+    const f = filletInfo(shape, i);
+    const u = this.content.unit, cal = this.content.calibrated;
+    el.innerHTML = `
+      <div class="insp-head"><b>Canto ${vertexLabel(i)} arredondado</b><button class="ib sm" data-x="close" aria-label="Fechar">${icon('close')}</button></div>
+      <div class="row"><button class="btn" data-x="sharp">Voltar a canto vivo</button></div>
+      <div class="mpad"></div>
+      <div class="info">${cal ? `Arco ≈ ${formatLength(f.length, u)} · cada parede encurta ${formatLength(f.t, u)}` : 'Meça as paredes para ver o raio real.'}<br>As medidas das paredes continuam de canto a canto (canto vivo pontilhado). Arraste a bolinha do arco para ajustar.</div>
+      ${f.clamped ? `<div class="warn">⚠ Raio maior do que cabe nas paredes — limitado a ${formatLength(f.r, u)}.</div>` : ''}`;
+    this.inputUnit ??= u;
+    new MeasurePad(el.querySelector('.mpad'), {
+      fields: [{ key: 'r', label: 'Raio', valueM: cal ? v.fillet : null }],
+      unit: this.inputUnit, next: false,
+      onUnit: (nu) => { this.inputUnit = nu; },
+      onApply: (vals) => {
+        if (!(vals.r > 0)) { toast('Digite o raio'); return; }
+        v.fillet = vals.r;
+        this.commit(); this.updateInspector();
+      },
+    });
+    el.querySelector('[data-x=sharp]').onclick = () => this.unFillet(shape, i);
   }
 
   doSplit(shape, i, t) {
@@ -1766,7 +1851,7 @@ export class Editor {
     this.inputUnit ??= u;
     new MeasurePad(el.querySelector('.mpad'), {
       fields: T.fields.map((f) => ({ key: f.key, label: f.label, valueM: o.size[f.key] })),
-      unit: this.inputUnit,
+      unit: this.inputUnit, next: false,
       onUnit: (nu) => { this.inputUnit = nu; },
       onApply: (vals) => {
         let any = false;
@@ -1804,6 +1889,7 @@ export class Editor {
     el.classList.remove('hidden');
     if (s.kind === 'seg') this.inspectSegment(el, opts);
     else if (s.kind === 'vertex') this.inspectVertex(el);
+    else if (s.kind === 'fillet') this.inspectFillet(el);
     else if (s.kind === 'shape') this.inspectShape(el);
     else if (s.kind === 'text') this.inspectText(el, opts);
     else if (s.kind === 'image') this.inspectImage(el);
