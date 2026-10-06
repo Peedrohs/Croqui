@@ -2,6 +2,8 @@
 import { esc } from './util.js';
 
 export function toast(msg, ms = 2200) {
+  // Um aviso por vez: o anterior sai (não empilha um sobre o outro).
+  document.querySelectorAll('.toast.show').forEach((t) => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); });
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;

@@ -10,7 +10,7 @@ import {
   splitSegment, splitSegmentN, segmentParamAt, removeVertex, mergeWithNext, mergeWithPrev, simplifyShape, closeShape,
   mergeVertices, looseVertices, contentBounds, joinClusters, joinCluster, joinAll, deleteSegment, reverseShape,
 } from './model.js';
-import { OBJECT_TYPES, newObject, objectAt, objectType, objectPreviewSVG } from './objects.js';
+import { OBJECT_TYPES, newObject, objectAt, objectType, objectPreviewSVG, isWallObject, nearestWall, attachToWall } from './objects.js';
 import { showContextMenu, hideContextMenu } from './ctxmenu.js';
 import { labelPoint, norm, distToSegment } from './geometry.js';
 import { lengthTolerance } from './solver.js';
@@ -1202,6 +1202,19 @@ export class Editor {
       }
       case 'dragObj': {
         const o = this.content.objects.find((x) => x.id === g.target.textId);
+        if (isWallObject(o)) {
+          // Desliza ao longo da parede; perto de outra parede, passa para ela.
+          const hit = nearestWall(this.content, w, 40 / this.view.k) || nearestWall(this.content, w, Infinity, o.host?.shapeId);
+          if (hit) {
+            const prev = o.host ? o.host.shapeId + ':' + o.host.seg : '';
+            attachToWall(this.content, o, hit);
+            if (prev && prev !== hit.shape.id + ':' + hit.seg) haptic();
+            const sh = hit.shape, n = sh.vertices.length;
+            this.snap = { guides: [], ring: null, edge: [sh.vertices[hit.seg], sh.vertices[(hit.seg + 1) % n]] };
+          }
+          this.render();
+          break;
+        }
         const r = this.snapObject(o, add(w, g.off));
         o.x = r.x; o.y = r.y; if (r.rot != null) o.rot = r.rot;
         this.snap = { guides: r.guides, ring: r.ring, edge: r.edge };
@@ -1798,6 +1811,19 @@ export class Editor {
   // ---------------- Colunas / objetos ----------------
   placeObject(type, w) {
     const o = newObject(type, w, this.content.unit);
+    if (isWallObject(o)) {
+      // Porta/janela/garagem: só existe dentro de uma parede.
+      const hit = nearestWall(this.content, w, 60 / this.view.k);
+      if (!hit) { toast(`Solte a ${objectType(o).name.toLowerCase()} em cima de uma parede reta`); return; }
+      attachToWall(this.content, o, hit);
+      this.content.objects.push(o);
+      this.setTool('select');
+      this.sel = { kind: 'obj', id: o.id };
+      this.commit(); this.updateInspector();
+      haptic();
+      toast(`${objectType(o).name} na parede — arraste para deslizar, toque para medir`);
+      return;
+    }
     const r = this.snapObject(o, w);
     o.x = r.x; o.y = r.y; if (r.rot != null) o.rot = r.rot;
     this.content.objects.push(o);
@@ -1805,6 +1831,54 @@ export class Editor {
     this.sel = { kind: 'obj', id: o.id };
     this.commit(); this.updateInspector();
     toast(`${objectType(o).name} inserida — toque para definir as medidas`);
+  }
+
+  // Porta / janela / porta de correr / garagem.
+  inspectWallObject(el, o, T) {
+    const u = this.content.unit;
+    const chips = (k, opts) => `<div class="seg-toggle">${opts.map(([v, l]) => `<button class="chip ${o[k] === v ? 'on' : ''}" data-ok="${k}" data-ov="${v}">${l}</button>`).join('')}</div>`;
+    el.innerHTML = `
+      <div class="insp-head"><b>${esc(T.name)}</b><button class="ib sm" data-x="close" aria-label="Fechar">${icon('close')}</button></div>
+      ${o.type === 'door' ? `<label>Abre para</label>${chips('swing', [[1, 'Dentro'], [-1, 'Fora']])}<div class="row"><button class="btn" data-x="hinge">⇄ Inverter lado da dobradiça</button></div>` : ''}
+      ${o.type === 'garage' ? `<label>Vagas</label>${chips('cars', [[1, '1 carro'], [2, '2 carros']])}` : ''}
+      <div class="mpad"></div>
+      <label class="ios-row plain"><span>Mostrar cota</span><input type="checkbox" switch data-k="showDims" ${o.showDims ? 'checked' : ''}></label>
+      <div class="row"><button class="btn" data-x="dup">Duplicar</button><button class="btn danger" data-x="del">Excluir</button></div>
+      <div class="info">Fica presa na parede e abre o vão na linha. Arraste para deslizar; perto de outra parede, passa para ela. Não entra no cálculo de área.</div>`;
+    this.inputUnit ??= u;
+    new MeasurePad(el.querySelector('.mpad'), {
+      fields: T.fields.map((f) => ({ key: f.key, label: f.label, valueM: o.size[f.key] })),
+      unit: this.inputUnit, next: false,
+      onUnit: (nu) => { this.inputUnit = nu; },
+      onApply: (vals) => {
+        if (!(vals.w > 0)) { toast('Digite a largura'); return; }
+        o.size.w = vals.w;
+        this.commit(); this.updateInspector();
+        toast('Largura aplicada');
+      },
+    });
+    el.querySelectorAll('[data-ok]').forEach((b) => (b.onclick = () => {
+      const k = b.dataset.ok, raw = b.dataset.ov;
+      o[k] = raw === 'true' ? true : raw === 'false' ? false : +raw;
+      if (k === 'cars') o.size.w = (u === 'ft' ? (o.cars === 1 ? 9 : 16) * 0.3048 : (o.cars === 1 ? 2.7 : 4.9));
+      this.commit(); this.updateInspector();
+    }));
+    el.querySelector('[data-x=hinge]')?.addEventListener('click', () => { o.flip = !o.flip; this.commit(); this.updateInspector(); });
+    el.querySelectorAll('input[data-k]').forEach((c) => (c.onchange = () => { o[c.dataset.k] = c.checked; this.commit(); }));
+    el.querySelector('[data-x=dup]').onclick = () => {
+      const c = structuredClone(o);
+      c.id = uid();
+      const sh = findShape(this.content, o.host?.shapeId);
+      if (sh) {
+        const a = sh.vertices[o.host.seg], b = sh.vertices[(o.host.seg + 1) % sh.vertices.length];
+        const L = dist(a, b), dt = (o.size.w * 1.3) / (L || 1);
+        c.host.t = o.host.t + dt <= 1 - o.size.w / 2 / L ? o.host.t + dt : o.host.t - dt;
+      }
+      this.content.objects.push(c);
+      this.sel = { kind: 'obj', id: c.id };
+      this.commit(); this.updateInspector();
+    };
+    el.querySelector('[data-x=del]').onclick = () => this.deleteSelection();
   }
 
   // Encaixe de colunas: centro de uma área, cantos, encostada em paredes, alinhada com outras.
@@ -1865,6 +1939,7 @@ export class Editor {
     const o = this.content.objects.find((x) => x.id === this.sel.id);
     const T = objectType(o);
     const u = this.content.unit;
+    if (T.wall) return this.inspectWallObject(el, o, T);
     el.innerHTML = `
       <div class="insp-head"><b>${esc(T.name)}</b><button class="ib sm" data-x="close" aria-label="Fechar">${icon('close')}</button></div>
       <div class="mpad"></div>

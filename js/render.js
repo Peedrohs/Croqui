@@ -268,10 +268,26 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
   const selShape = ui.sel && ui.sel.shapeId;
   // Divisas coincidentes entre áreas: não desenha (as duas áreas parecem um contorno só).
   // A área selecionada mostra o contorno inteiro, para você ver o que é dela.
+  syncWallObjects(content);
   const hidden = sharedEdges(content, Math.max(1e-3, 1.5 / v.k));
+  // Vãos de portas/janelas: abrem a linha da parede (também na área selecionada).
+  const gaps = new Map();
+  for (const g of wallGaps(content)) {
+    const sh = content.shapes.find((x) => x.id === g.shapeId);
+    if (!sh) continue;
+    const ex = expandFillets(sh);
+    const j = ex === sh ? g.seg : ex.map[g.seg];
+    if (j == null) continue;
+    const a = ex.vertices[j], b = ex.vertices[(j + 1) % ex.vertices.length];
+    const L2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+    if (L2 < 1e-12) continue;
+    const tp = (P) => ((P.x - a.x) * (b.x - a.x) + (P.y - a.y) * (b.y - a.y)) / L2;
+    const iv = [Math.min(tp(g.A), tp(g.B)), Math.max(tp(g.A), tp(g.B))];
+    for (const M of [hidden, gaps]) { const k = sh.id + ':' + j; if (!M.has(k)) M.set(k, []); M.get(k).push(iv); }
+  }
   const noHide = new Map();
   for (const s of content.shapes) {
-    const d = s.id === selShape && !opts.export ? shapePath(s, v) : outlinePath(s, v, hidden);
+    const d = outlinePath(s, v, s.id === selShape && !opts.export ? gaps : hidden);
     if (!d) continue;
     const isSel = s.id === selShape && !opts.export;
     const report = ui.reports?.[s.id];
@@ -470,7 +486,7 @@ export function buildExportSVG(content, { title = '', subtitle = '', project = '
 
 import { textureName } from './textures.js';
 import { markupSVG, markupPoints } from './markup.js';
-import { buildObjectFills, objectOutline, objectType } from './objects.js';
+import { buildObjectFills, objectOutline, objectType, isWallObject, wallSymbolSVG, wallGaps, syncWallObjects } from './objects.js';
 const textureNameSafe = (f) => (f ? textureName(f) : '—');
 
 // Miniatura só com contornos (lista de pastas).
@@ -498,11 +514,33 @@ function exportFooter(W, y, H, { project, date, logo }) {
 }
 
 // Colunas/objetos: contorno, cotas (opcionais por objeto) e alças quando selecionado.
+// Porta / janela / porta de correr / garagem: símbolo + toque + largura do vão.
+function wallObjectOverlay(content, ob, v, ui, opts, px) {
+  const sel = !opts.export && ui.sel?.kind === 'obj' && ui.sel.id === ob.id;
+  let o = wallSymbolSVG(ob, (q) => S(q, v), v.k, { ink: sel ? C.accent : C.ink });
+  if (!opts.export) {
+    const poly = objectOutline(ob).map((q) => S(q, v));
+    o += `<path d="M${poly.map((q) => `${f1(q.x)} ${f1(q.y)}`).join('L')}Z" fill="transparent" stroke="transparent" stroke-width="12" data-hit="obj" data-t="${ob.id}"/>`;
+    if (sel) o += `<path d="M${poly.map((q) => `${f1(q.x)} ${f1(q.y)}`).join('L')}Z" fill="${C.accent}" fill-opacity=".06" stroke="${C.accent}" stroke-width="1" stroke-dasharray="4 4"/>`;
+  }
+  if (ob.showDims) {
+    const a = ((ob.rot || 0) * Math.PI) / 180, u = { x: Math.cos(a), y: Math.sin(a) };
+    // Do lado de dentro da área: por fora ficam as cotas das paredes.
+    const n = mul({ x: -u.y, y: u.x }, ob.inward || 1);
+    const deep = ob.type === 'garage' ? ob.size.w * 0.14 * v.k + px : px + 8;
+    const c = add(S({ x: ob.x, y: ob.y }, v), mul(n, deep));
+    const txt = formatLength(ob.size.w, content.unit) + (ob.type === 'garage' ? ` · ${ob.cars || 2} carro${(ob.cars || 2) > 1 ? 's' : ''}` : '');
+    o += label(c.x, c.y, upright(u), txt, { color: C.measured, px, weight: 600 });
+  }
+  return o;
+}
+
 function objectsOverlay(content, v, ui, opts) {
   let o = '';
   const unit = content.unit;
   const px = opts.export ? 18 : Math.max(11, (opts.dimPx || 14) - 2);
   for (const ob of content.objects || []) {
+    if (isWallObject(ob)) { o += wallObjectOverlay(content, ob, v, ui, opts, px); continue; }
     const poly = objectOutline(ob).map((q) => S(q, v));
     const d = 'M' + poly.map((q) => `${f1(q.x)} ${f1(q.y)}`).join('L') + 'Z';
     const sel = !opts.export && ui.sel?.kind === 'obj' && ui.sel.id === ob.id;
