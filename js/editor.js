@@ -8,7 +8,7 @@ import { recognizeStroke } from './freehand.js';
 import {
   newShape, newSegment, solveInContent, findShape, shapeAt, stats, deleteVertex, moveShape, hasMeasures,
   splitSegment, splitSegmentN, segmentParamAt, removeVertex, mergeWithNext, mergeWithPrev, simplifyShape, closeShape,
-  mergeVertices, looseVertices, deleteSegment, reverseShape,
+  mergeVertices, looseVertices, contentBounds, joinClusters, joinCluster, joinAll, deleteSegment, reverseShape,
 } from './model.js';
 import { OBJECT_TYPES, newObject, objectAt, objectType, objectPreviewSVG } from './objects.js';
 import { showContextMenu, hideContextMenu } from './ctxmenu.js';
@@ -256,7 +256,7 @@ export class Editor {
     const P = this.pal;
     const M = `matrix(${v.k} 0 0 ${v.k} ${v.x} ${v.y})`;
     this.gGrid.innerHTML = this.settings.showGrid === false ? '' : buildGrid(v, w, h, this.content.unit, P);
-    this.loose = this.tool === 'markup' ? null : looseVertices(this.content, 22 / v.k);
+    this.loose = this.tool === 'markup' ? null : this.looseState();
     if (this.imagesDirty) { this.gImages.innerHTML = buildImages(this.content); this.imagesDirty = false; }
     this.gImages.setAttribute('transform', M);
     if (this.fillsDirty) { this.gFills.innerHTML = buildFills(this.content, P); this.fillsDirty = false; }
@@ -444,8 +444,33 @@ export class Editor {
     this.render();
   }
 
-  undo() { if (this.undoStack.length) { this.redoStack.push(this.lastSnap); this.restore(this.undoStack.pop()); } }
-  redo() { if (this.redoStack.length) { this.undoStack.push(this.lastSnap); this.restore(this.redoStack.pop()); } }
+  undo() { if (this.undoStack.length) { this.redoStack.push(this.lastSnap); this.keepVisualSize(() => this.restore(this.undoStack.pop())); } }
+  redo() { if (this.redoStack.length) { this.undoStack.push(this.lastSnap); this.keepVisualSize(() => this.restore(this.redoStack.pop())); } }
+
+  // 1.3 — Escala real ≠ zoom da tela. Quando uma medida reescala/redesenha o croqui, o zoom
+  // compensa na mesma hora: o desenho fica do MESMO tamanho e no MESMO lugar na tela.
+  drawingBox() {
+    const pts = contentBounds(this.content);
+    for (const o of this.content.objects || []) pts.push({ x: o.x, y: o.y });
+    if (pts.length < 2) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    const size = Math.hypot(x1 - x0, y1 - y0);
+    return size > 1e-6 ? { c: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 }, size } : null;
+  }
+
+  keepVisualSize(fn) {
+    const b0 = this.view && this.drawingBox();
+    const r = fn();
+    const b1 = b0 && this.drawingBox();
+    if (!b0 || !b1) return r;
+    const v = this.view;
+    const k = clamp(v.k * (b0.size / b1.size), 2, 4000);
+    const sc = { x: b0.c.x * v.k + v.x, y: b0.c.y * v.k + v.y }; // centro do desenho na tela (antes)
+    this.view = { k, x: sc.x - b1.c.x * k, y: sc.y - b1.c.y * k };
+    this.render();
+    return r;
+  }
 
   selectionValid() {
     const s = this.sel;
@@ -464,8 +489,10 @@ export class Editor {
     for (const s of this.content.shapes) if (hasMeasures(s)) this.reports[s.id] = solveShape(s).report;
   }
 
-  solve(shape) {
-    this.reports[shape.id] = solveInContent(this.content, shape);
+  // fit: a mudança veio de uma MEDIDA digitada → o zoom compensa (1.3). Arrastes não compensam.
+  solve(shape, fit = false) {
+    const run = () => solveInContent(this.content, shape);
+    this.reports[shape.id] = fit ? this.keepVisualSize(run) : run();
     const r = this.reports[shape.id];
     if (r.badSegments.length || r.badVertices.length) toast('Medidas não fecham: erro distribuído — lados/cantos em vermelho');
   }
@@ -676,7 +703,7 @@ export class Editor {
     if (this.sel?.kind !== 'seg') { toast('Selecione um lado para receber a medida'); return; }
     const shape = findShape(this.content, this.sel.shapeId);
     shape.segments[this.sel.i].length = m;
-    this.solve(shape);
+    this.solve(shape, true);
     this.commit();
     this.selectNextSegment(shape, this.sel.i);
     this.updateInspector();
@@ -888,7 +915,7 @@ export class Editor {
     for (const g of s.segments) if (g.type === 'arc' && g.autoBulge) { g.bulge = -orient * Math.abs(g.bulge); delete g.autoBulge; }
     this.drawing = null;
     this.sel = { kind: 'shape', shapeId: s.id };
-    if (hasMeasures(s)) this.solve(s);
+    if (hasMeasures(s)) this.solve(s, true);
     this.commit();
     this.setTool('select');
     this.updateInspector();
@@ -959,6 +986,9 @@ export class Editor {
     const w = this.toWorld(p);
     const base = { id: e.pointerId, start: p, last: p, moved: false, pointerType: e.pointerType };
     const drawInput = this.isDrawInput(e);
+    // Anel de "pontos quase juntos": tocar nele une, em qualquer ferramenta de desenho.
+    const pair = ((this.tool === 'point' && !this.drawing) || this.tool === 'free') && document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-hit=pair]');
+    if (pair) { this.gesture = { ...base, type: 'press', target: { kind: 'pair', i: +pair.dataset.i }, w0: w }; return; }
     if (this.tool === 'point') {
       if (drawInput) { this.gesture = { ...base, type: 'place' }; this.updatePlace(p); }
       else this.gesture = { ...base, type: 'pan' };
@@ -1308,6 +1338,7 @@ export class Editor {
       return;
     }
     // "Unir com…": o toque seguinte num vértice completa a união.
+    if (t?.kind === 'pair') { this.pendingMerge = null; return this.joinOne(t.i); }
     if (this.pendingMerge) {
       const A = this.pendingMerge;
       this.pendingMerge = null;
@@ -1580,12 +1611,47 @@ export class Editor {
   }
 
   // Indicador permanente: contorno fechado/aberto e pontos soltos.
+  // Tolerância de "quase junto" em pixels de tela (≈ 18 px), convertida para o mundo.
+  joinTol() { return Math.max(18, (this.settings.snapPx || 15) * 1.2) / this.view.k; }
+
+  looseState() {
+    const clusters = joinClusters(this.content, this.joinTol());
+    const inCl = new Set(clusters.flatMap((c) => c.members.map((m) => `${m.shapeId}:${m.i}`)));
+    return { clusters, ends: looseVertices(this.content, 0).ends.filter((e) => !inCl.has(`${e.shapeId}:${e.i}`)) };
+  }
+
+  // Une só o grupo do anel tocado.
+  joinOne(k) {
+    const cl = joinClusters(this.content, this.joinTol())[k];
+    if (!cl) return;
+    const r = joinCluster(this.content, cl);
+    this.afterJoin(r.shapes, 1);
+  }
+
+  afterJoin(ids, groups) {
+    let closed = 0;
+    for (const id of ids) {
+      const sh = findShape(this.content, id);
+      if (!sh) continue;
+      if (sh.closed) closed++;
+      if (hasMeasures(sh)) this.reports[sh.id] = this.keepVisualSize(() => solveInContent(this.content, sh));
+    }
+    this.recomputeReports();
+    const one = [...ids].map((id) => findShape(this.content, id)).find((x) => x?.closed);
+    this.sel = one ? { kind: 'shape', shapeId: one.id } : null;
+    this.commit(); this.updateInspector();
+    haptic('success');
+    toast(`${groups} ${groups > 1 ? 'uniões feitas' : 'união feita'}${closed ? ` · ${closed > 1 ? `${closed} contornos fechados` : 'contorno fechado'}` : ''}`);
+  }
+
   updateShapeState(selShape) {
     const el = this.elState;
-    const L = this.loose || { ends: [], pairs: [] };
+    const L = this.loose || { ends: [], clusters: [] };
     const openShapes = this.content.shapes.filter((x) => !x.closed && x.vertices.length >= 2);
     let cls = '', txt = '';
-    if (L.pairs.length) { cls = 'warn'; txt = `⚠ ${L.pairs.length} ponto${L.pairs.length > 1 ? 's' : ''} quase junto${L.pairs.length > 1 ? 's' : ''} · Unir`; }
+    const nc = L.clusters.length;
+    if (nc === 1) { cls = 'warn'; txt = `⚠ ${L.clusters[0].members.length} pontos quase juntos · Unir`; }
+    else if (nc > 1) { cls = 'warn'; txt = `⚠ ${nc} uniões pendentes · Unir todas`; }
     else if (selShape) { cls = selShape.closed ? 'ok' : 'open'; txt = selShape.closed ? '● Fechado' : selShape.vertices.length >= 3 ? '○ Aberto · Fechar' : '○ Aberto'; }
     else if (openShapes.length) { cls = 'open'; txt = `○ ${openShapes.length} contorno${openShapes.length > 1 ? 's' : ''} aberto${openShapes.length > 1 ? 's' : ''}`; }
     else if (this.content.shapes.length) { cls = 'ok'; txt = '● Tudo fechado'; }
@@ -1594,21 +1660,11 @@ export class Editor {
   }
 
   stateAction() {
-    const L = this.loose || { ends: [], pairs: [] };
-    if (L.pairs.length) {
-      // Une todos os pares quase sobrepostos, na posição média.
-      let k = 0, guard = 0;
-      while (guard++ < 50) {
-        const p = looseVertices(this.content, 22 / this.view.k).pairs[0];
-        if (!p) break;
-        const r = mergeVertices(this.content, p[0], p[1], 'avg');
-        if (r.result === 'moved') break;
-        k++;
-      }
-      this.recomputeReports();
-      this.commit(); this.updateInspector();
-      haptic();
-      toast(k ? `${k} união(ões) feita(s)` : 'Nada para unir');
+    // Mesma lista que o chip e os anéis mostram (recalculada agora, com a mesma tolerância).
+    this.loose = this.looseState();
+    if (this.loose.clusters.length) {
+      const r = joinAll(this.content, this.joinTol());
+      this.afterJoin(r.shapes, r.groups);
       return;
     }
     const sel = this.sel?.shapeId && findShape(this.content, this.sel.shapeId);
@@ -1799,7 +1855,7 @@ export class Editor {
         if (!(L > 0) && !(S > 0)) { toast('Digite a medida'); return; }
         if (isFinite(L) && L > 0) seg.length = L;
         if (seg.type === 'arc' && isFinite(S) && S > 0) seg.sagitta = S * Math.sign(seg.bulge || 1);
-        this.solve(shape);
+        this.solve(shape, true);
         this.commit();
         if (next) this.selectNextSegment(shape, i);
         this.updateInspector();
@@ -1863,7 +1919,7 @@ export class Editor {
     el.querySelectorAll('[data-m]').forEach((b) => (b.onclick = () => {
       v.angleMode = b.dataset.m;
       if (v.angleMode === 'fixed') { v.angle = v.angle ?? Math.round(ang * 10) / 10; }
-      this.solve(shape); this.commit(); this.updateInspector();
+      this.solve(shape, true); this.commit(); this.updateInspector();
     }));
     const angBtn = el.querySelector('[data-x=ang]');
     if (angBtn) {
@@ -1871,7 +1927,7 @@ export class Editor {
         const a = parseNumber(el.querySelector('#ang').value);
         if (!(a > 0 && a < 360)) { toast('Ângulo inválido'); return; }
         v.angleMode = 'fixed'; v.angle = a;
-        this.solve(shape); this.commit(); this.updateInspector();
+        this.solve(shape, true); this.commit(); this.updateInspector();
       };
       angBtn.onclick = go;
       el.querySelector('#ang').onkeydown = (e) => { if (e.key === 'Enter') go(); };

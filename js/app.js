@@ -161,6 +161,7 @@ async function openFolder(folderId, sketchId) {
     onDeleteSketch: async (id) => { await db.deleteSketch(id); folder.lastSketchId = null; await db.putFolder(folder); openFolder(folderId); },
     onExportFolder: () => exportFolder(folderId),
   });
+  window.__croquiEditor = editor; // depuração / testes automatizados
 }
 
 function route() {

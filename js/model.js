@@ -282,33 +282,158 @@ export function reverseShape(shape) {
   shape.segments = shape.segments.slice().reverse().map((g) => ({ ...g, bulge: -(g.bulge || 0), sagitta: g.sagitta != null ? -g.sagitta : null }));
 }
 
-// Detector de pontas soltas: extremidades de formas abertas + pares de vértices de formas
-// diferentes muito próximos (parecem ligados mas não estão). tol em unidades do mundo.
-export function looseVertices(content, tol) {
+// ---------- Pontos quase juntos: FONTE ÚNICA (anel, chip "Unir" e a ação usam isto) ----------
+// Só conta o que dá para ligar de verdade — sempre envolve uma ponta de forma ABERTA:
+//   close   pontas da mesma forma aberta            → fecha o contorno
+//   join    pontas de duas formas abertas           → emenda numa forma só
+//   closeAt ponta encostando num vértice da própria forma (desenho em "6") → laço fechado + cauda
+//   attach  ponta encostando num vértice de outra forma → a ponta vai para o vértice
+// Áreas fechadas com cantos próximos NÃO entram (são independentes). tol em unidades do mundo.
+const KIND_ORDER = { close: 0, join: 1, closeAt: 2, attach: 3 };
+const EPS = 1e-7;
+export function joinCandidates(content, tol) {
   const out = [];
+  const shapes = content.shapes.filter((s) => s.vertices.length >= 2);
+  const ends = [];
+  for (const s of shapes) if (!s.closed) ends.push({ s, i: 0 }, { s, i: s.vertices.length - 1 });
+  const seen = new Set();
+  for (const E of ends) {
+    const pe = E.s.vertices[E.i];
+    for (const s of shapes) {
+      const n = s.vertices.length;
+      for (let j = 0; j < n; j++) {
+        if (s === E.s && j === E.i) continue;
+        const d = dist(pe, s.vertices[j]);
+        if (d > tol) continue;
+        const otherIsEnd = !s.closed && (j === 0 || j === n - 1);
+        let kind;
+        if (s === E.s) {
+          if (otherIsEnd) { if (n < 4) continue; kind = 'close'; }
+          else {
+            // laço de pelo menos 3 vértices e não vizinho da ponta
+            const loop = E.i === 0 ? j : n - 1 - j;
+            if (loop < 3) continue;
+            kind = 'closeAt';
+          }
+        } else if (otherIsEnd) kind = 'join';
+        else { if (d <= EPS) continue; kind = 'attach'; } // já encostado = ligado
+        const ka = `${E.s.id}:${E.i}`, kb = `${s.id}:${j}`;
+        const key = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ kind, d, a: { shapeId: E.s.id, i: E.i }, b: { shapeId: s.id, i: j }, anchorB: kind === 'attach' });
+      }
+    }
+  }
+  return out.sort((p, q) => KIND_ORDER[p.kind] - KIND_ORDER[q.kind] || p.d - q.d);
+}
+
+// Agrupa os pares em grupos (3 pontos quase juntos = 1 grupo). Cada grupo vira 1 anel e 1 união.
+export function joinClusters(content, tol) {
+  const pairs = joinCandidates(content, tol);
+  const key = (r) => `${r.shapeId}:${r.i}`;
+  const parent = new Map();
+  const find = (k) => { while (parent.get(k) !== k) { parent.set(k, parent.get(parent.get(k))); k = parent.get(k); } return k; };
+  const add = (k) => { if (!parent.has(k)) parent.set(k, k); };
+  for (const p of pairs) { add(key(p.a)); add(key(p.b)); parent.set(find(key(p.a)), find(key(p.b))); }
+  const groups = new Map();
+  for (const p of pairs) {
+    const r = find(key(p.a));
+    if (!groups.has(r)) groups.set(r, { members: new Map(), anchors: new Set(), pairs: [] });
+    const g = groups.get(r);
+    g.members.set(key(p.a), p.a); g.members.set(key(p.b), p.b); g.pairs.push(p);
+    if (p.anchorB) g.anchors.add(key(p.b));
+  }
+  return [...groups.values()].map((g) => {
+    const members = [...g.members.values()];
+    // Vértices que não são pontas soltas (de formas já prontas) ficam parados: as pontas vão até eles.
+    const anchors = members.filter((m) => g.anchors.has(key(m)) && !isOpenEnd(content, m));
+    const base = anchors.length ? anchors : members;
+    const pts = base.map((m) => findShape(content, m.shapeId).vertices[m.i]);
+    const center = { x: pts.reduce((t, p) => t + p.x, 0) / pts.length, y: pts.reduce((t, p) => t + p.y, 0) / pts.length };
+    return { members, center, pairs: g.pairs };
+  });
+}
+
+function isOpenEnd(content, r) {
+  const s = findShape(content, r.shapeId);
+  return s && !s.closed && (r.i === 0 || r.i === s.vertices.length - 1);
+}
+
+// Une um grupo: leva todos os pontos ao centro e religa a topologia (fecha / emenda / laço).
+// Devolve { ops, shapes:Set(ids tocados) }.
+export function joinCluster(content, cluster) {
+  const touched = new Set();
+  for (const m of cluster.members) {
+    const s = findShape(content, m.shapeId);
+    if (!s) continue;
+    s.vertices[m.i].x = cluster.center.x; s.vertices[m.i].y = cluster.center.y;
+    touched.add(s.id);
+  }
+  let ops = 0, guard = 0;
+  while (guard++ < 100) {
+    const p = joinCandidates(content, 1e-9).find((q) => q.kind !== 'attach' && dist(findShape(content, q.a.shapeId).vertices[q.a.i], cluster.center) < 1e-6);
+    if (!p) break;
+    const r = p.kind === 'closeAt' ? closeAtVertex(content, p.a, p.b) : mergeVertices(content, p.a, p.b, 'first');
+    if (!r || r.result === 'moved') break;
+    ops++;
+    touched.add(r.shape.id);
+    for (const t of r.created || []) touched.add(t.id);
+  }
+  for (const id of [...touched]) if (!findShape(content, id)) touched.delete(id);
+  return { ops, shapes: touched };
+}
+
+// Une TODOS os grupos (o botão "Unir" do chip). Devolve { groups, shapes }.
+export function joinAll(content, tol) {
+  let groups = 0, guard = 0;
+  const shapes = new Set();
+  while (guard++ < 50) {
+    const cl = joinClusters(content, tol)[0];
+    if (!cl) break;
+    const r = joinCluster(content, cl);
+    r.shapes.forEach((id) => shapes.add(id));
+    groups++;
+  }
+  for (const id of [...shapes]) if (!findShape(content, id)) shapes.delete(id);
+  return { groups, shapes };
+}
+
+// Ponta E de uma forma aberta encosta no vértice J da mesma forma: separa o laço (fechado,
+// fica com a identidade/preenchimento) e a cauda (forma aberta nova, se tiver lado).
+export function closeAtVertex(content, E, J) {
+  const s = findShape(content, E.shapeId);
+  if (!s || s.closed) return null;
+  let j = J.i;
+  if (E.i === 0) { reverseShape(s); j = s.vertices.length - 1 - j; }
+  const n = s.vertices.length;
+  if (n - 1 - j < 3) return null;
+  const tailV = s.vertices.slice(0, j + 1), tailS = s.segments.slice(0, j);
+  s.vertices = s.vertices.slice(j, n - 1);
+  s.segments = s.segments.slice(j, n - 1);
+  s.closed = true;
+  const created = [];
+  if (tailV.length >= 2) {
+    const t = { ...newShape(tailV[0]), vertices: tailV.map((v) => ({ ...v })), segments: tailS.map((g) => ({ ...g })) };
+    content.shapes.push(t);
+    created.push(t);
+  }
+  return { result: 'closed', shape: s, created };
+}
+
+// Compatível com o detector antigo: pontas abertas que NÃO estão ligadas a nada + pares.
+export function looseVertices(content, tol) {
+  const pairs = joinCandidates(content, tol).map((p) => [p.a, p.b]);
   const ends = [];
   for (const s of content.shapes) {
-    if (!s.closed && s.vertices.length >= 2) {
-      ends.push({ shapeId: s.id, i: 0 }, { shapeId: s.id, i: s.vertices.length - 1 });
+    if (s.closed || s.vertices.length < 2) continue;
+    for (const i of [0, s.vertices.length - 1]) {
+      const p = s.vertices[i];
+      const linked = content.shapes.some((o) => o.vertices.some((q, j) => !(o === s && j === i) && dist(p, q) <= EPS));
+      if (!linked) ends.push({ shapeId: s.id, i, kind: 'open' });
     }
   }
-  for (const e of ends) out.push({ ...e, kind: 'open' });
-  const all = content.shapes.flatMap((s) => s.vertices.map((v, i) => ({ shapeId: s.id, i, v, s })));
-  const pairs = [];
-  for (let a = 0; a < all.length; a++) for (let b = a + 1; b < all.length; b++) {
-    const A = all[a], B = all[b];
-    const d = dist(A.v, B.v);
-    if (d > tol) continue;
-    if (A.shapeId === B.shapeId) {
-      const n = A.s.vertices.length;
-      const adj = Math.abs(A.i - B.i) === 1 || (A.s.closed && Math.abs(A.i - B.i) === n - 1);
-      const ends2 = !A.s.closed && ((A.i === 0 && B.i === n - 1) || (B.i === 0 && A.i === n - 1));
-      if (!(adj || ends2) && d > tol * 0.02) continue;
-      if (adj && d > tol * 0.5) continue; // parede curta de verdade
-    }
-    pairs.push([{ shapeId: A.shapeId, i: A.i }, { shapeId: B.shapeId, i: B.i }]);
-  }
-  return { ends: out, pairs };
+  return { ends, pairs };
 }
 
 // Exclui a parede i. Fechado → vira aberto começando depois dela. Aberto → divide em dois.

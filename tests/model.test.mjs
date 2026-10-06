@@ -41,3 +41,42 @@ const rect = () => { const s = newShape({ x: 0, y: 0 }); s.vertices = [[0, 0], [
   const r = mergeVertices(c, { shapeId: a.id, i: 1 }, { shapeId: b.id, i: 0 }); assert.equal(r.result, 'joined'); assert.equal(a.vertices.length, 3); assert.ok(!a.closed); console.log('ok join open'); }
 // closeShape
 { const s = newShape({ x: 0, y: 0 }); s.vertices = [[0, 0], [4, 0], [4, 3]].map(([x, y]) => ({ x, y })); s.segments = [newSegment(), newSegment()]; closeShape(s); assert.equal(segmentCount(s), 3); near(shapeArea(s), 6); console.log('ok closeShape'); }
+
+// ---- "Unir pontos quase juntos": fonte única (joinClusters) + topologia religada ----
+{ const { joinClusters, joinAll, joinCandidates } = await import('../js/model.js');
+  const P = (pts) => pts.map(([x, y]) => ({ x, y, angleMode: 'auto' }));
+  // 2 pontos: forma aberta com as pontas quase juntas → 1 grupo; Unir fecha de verdade.
+  { const c = newContent('m'); const s = newShape({ x: 0, y: 0 }); s.vertices = P([[0, 0], [10, 0], [10, 5], [0, 5], [0.08, -0.06]]); s.segments = [0, 1, 2, 3].map(() => newSegment()); c.shapes.push(s);
+    assert.equal(joinClusters(c, 0.2).length, 1);
+    const r = joinAll(c, 0.2);
+    assert.equal(r.groups, 1); assert.ok(s.closed); assert.equal(s.vertices.length, 4); assert.equal(segmentCount(s), 4);
+    assert.equal(joinClusters(c, 0.2).length, 0, 'depois de unir não sobra alerta');
+    assert.equal(looseVertices(c, 0).ends.length, 0); console.log('ok unir 2 pontos'); }
+  // Pontas sobrepostas (d=0) mas desligadas também contam — era o "não há nada para unir".
+  { const c = newContent('m'); const s = newShape({ x: 0, y: 0 }); s.vertices = P([[0, 0], [10, 0], [10, 5], [0, 5], [0, 0]]); s.segments = [0, 1, 2, 3].map(() => newSegment()); c.shapes.push(s);
+    assert.equal(joinClusters(c, 0.2).length, 1); joinAll(c, 0.2); assert.ok(s.closed); console.log('ok unir sobrepostos'); }
+  // 3 traços que formam um triângulo: 3 grupos de 2 → um contorno fechado.
+  { const c = newContent('m'); const mk = (pts) => { const s = newShape({ x: 0, y: 0 }); s.vertices = P(pts); s.segments = [newSegment()]; c.shapes.push(s); return s; };
+    mk([[0, 0], [10, 0]]); mk([[10.05, 0.03], [5, 8]]); mk([[5.04, 8.05], [0.06, -0.02]]);
+    assert.equal(joinClusters(c, 0.2).length, 3);
+    const r = joinAll(c, 0.2);
+    assert.equal(r.groups, 3); assert.equal(c.shapes.length, 1); assert.ok(c.shapes[0].closed); assert.equal(c.shapes[0].vertices.length, 3);
+    assert.equal(joinClusters(c, 0.2).length, 0); console.log('ok unir 3 traços'); }
+  // 3 pontos no mesmo lugar: U aberto (2 pontas) + traço solto → 1 grupo; fecha e a ponta do traço encosta.
+  { const c = newContent('m'); const u = newShape({ x: 0, y: 0 }); u.vertices = P([[0, 0], [10, 0], [10, 5], [0, 5], [0.1, 0.05]]); u.segments = [0, 1, 2, 3].map(() => newSegment()); c.shapes.push(u);
+    const t = newShape({ x: 0, y: 0 }); t.vertices = P([[-4, -4], [-0.05, 0.08]]); t.segments = [newSegment()]; c.shapes.push(t);
+    const cl = joinClusters(c, 0.2); assert.equal(cl.length, 1); assert.equal(cl[0].members.length, 3);
+    joinAll(c, 0.2);
+    assert.ok(u.closed); assert.equal(u.vertices.length, 4);
+    near(dist(t.vertices[1], u.vertices[0]), 0, 1e-9);
+    assert.equal(joinClusters(c, 0.2).length, 0); console.log('ok unir 3 pontos'); }
+  // Ponta encostando no meio do próprio traço ("6"): vira laço fechado + cauda aberta.
+  { const c = newContent('m'); const s = newShape({ x: 0, y: 0 }); s.vertices = P([[-5, 0], [0, 0], [10, 0], [10, 5], [0, 5], [0.05, 0.05]]); s.segments = [0, 1, 2, 3, 4].map(() => newSegment()); c.shapes.push(s);
+    assert.equal(joinCandidates(c, 0.2)[0].kind, 'closeAt');
+    joinAll(c, 0.2);
+    assert.ok(s.closed); assert.equal(s.vertices.length, 4); near(shapeArea(s), 50, 0.6);
+    assert.equal(c.shapes.length, 2); assert.equal(c.shapes[1].vertices.length, 2); console.log('ok unir em 6'); }
+  // Áreas fechadas com cantos próximos NÃO são alerta (são independentes).
+  { const c = newContent('m'); const a = rect(); const b = rect(); b.vertices.forEach((v) => { v.x += 10.05; }); c.shapes.push(a, b);
+    assert.equal(joinClusters(c, 0.2).length, 0); console.log('ok áreas independentes'); }
+}

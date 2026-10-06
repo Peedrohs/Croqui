@@ -323,7 +323,9 @@ textarea.field { resize: vertical; min-height: 96px; }
 :root[data-theme='dark'] .state-line.ok { color: #30d158; } :root[data-theme='dark'] .state-line.open { color: #ffb340; }
 @keyframes loosePulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .canvas .loose { animation: loosePulse 1.2s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .canvas .loose { animation: none; } }
+@keyframes joinPulse { 0%, 100% { opacity: .95; transform: scale(1); } 50% { opacity: .45; transform: scale(1.18); } }
+.canvas .join-ring { transform-box: fill-box; transform-origin: center; animation: joinPulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .canvas .loose, .canvas .join-ring { animation: none; } }
 
 /* ---------- Biblioteca: abas Texturas / Objetos ---------- */
 .lib-tabs { width: 100%; }

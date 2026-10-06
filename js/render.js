@@ -298,19 +298,24 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
       }
       o += `<circle cx="${f1(q.x)}" cy="${f1(q.y)}" r="6" fill="${dr.snap ? C.guide : C.accent}" stroke="${C.handle}" stroke-width="2"/>`;
     }
-    // Pontas soltas / pontos quase juntos: anel vermelho pulsando.
+    // Pontas soltas (tracejado) e pontos quase juntos (anel fino pulsando, tocável para unir só aquele).
     for (const e of ui.loose?.ends || []) {
       const sh = content.shapes.find((x) => x.id === e.shapeId);
       if (!sh) continue;
       const q = S(sh.vertices[e.i], v);
-      o += `<circle class="loose" cx="${f1(q.x)}" cy="${f1(q.y)}" r="13" fill="none" stroke="${C.bad}" stroke-width="2.5" stroke-dasharray="4 3"/>`;
+      o += `<circle class="loose" cx="${f1(q.x)}" cy="${f1(q.y)}" r="12" fill="none" stroke="${C.bad}" stroke-width="1.5" stroke-dasharray="3 3"/>`;
     }
-    for (const [a, b] of ui.loose?.pairs || []) {
-      const sa = content.shapes.find((x) => x.id === a.shapeId), sb = content.shapes.find((x) => x.id === b.shapeId);
-      if (!sa || !sb) continue;
-      const qa = S(sa.vertices[a.i], v), qb = S(sb.vertices[b.i], v);
-      o += `<circle class="loose" cx="${f1((qa.x + qb.x) / 2)}" cy="${f1((qa.y + qb.y) / 2)}" r="18" fill="${C.bad}" fill-opacity=".12" stroke="${C.bad}" stroke-width="2.5"/>`;
-    }
+    (ui.loose?.clusters || []).forEach((cl, k) => {
+      const c = S(cl.center, v);
+      let r = 0;
+      for (const m of cl.members) {
+        const sh = content.shapes.find((x) => x.id === m.shapeId);
+        if (sh) r = Math.max(r, Math.hypot(S(sh.vertices[m.i], v).x - c.x, S(sh.vertices[m.i], v).y - c.y));
+      }
+      r = Math.max(16, r + 11);
+      o += `<g data-hit="pair" data-i="${k}"><circle cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(r)}" fill="none" stroke="transparent" stroke-width="18" pointer-events="stroke"/>` +
+        `<circle class="join-ring" cx="${f1(c.x)}" cy="${f1(c.y)}" r="${f1(r)}" fill="none" stroke="${C.bad}" stroke-width="1.6" pointer-events="none"/></g>`;
+    });
     // Guias de encaixe (alinhamento, extensão de parede) e realce do encaixe.
     for (const g of ui.guides || []) {
       const a = S(g[0], v), b = S(g[1], v);
