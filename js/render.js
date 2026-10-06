@@ -7,6 +7,7 @@ import { renderFill } from './textures.js';
 import { rightAngleVertices } from './solver.js';
 import { stats } from './model.js';
 import { CANVAS_LIGHT } from './theme.js';
+import { sharedEdges, visiblePieces, hiddenFraction } from './areas.js';
 
 // Paleta ativa (tela: tema atual; exportação: sempre clara). Definida no início de cada build.
 let C = CANVAS_LIGHT;
@@ -91,6 +92,32 @@ function visSegPath(shape, i, v) {
   return ex === shape ? segPath(shape, i, v) : segPath(ex, ex.map[i], v);
 }
 
+// Contorno sem os trechos ocultos (divisa compartilhada com outra área, vãos de portas…).
+function outlinePath(shape, v, hidden) {
+  const ex = expandFillets(shape);
+  const m = segmentCount(ex);
+  if (!m) return '';
+  if (![...Array(m).keys()].some((j) => hidden.has(shape.id + ':' + j))) return shapePath(shape, v);
+  let d = '';
+  for (let j = 0; j < m; j++) {
+    const iv = hidden.get(shape.id + ':' + j);
+    if (!iv) { d += segPath(ex, j, v, true); continue; }
+    const a = ex.vertices[j], b = ex.vertices[(j + 1) % ex.vertices.length];
+    for (const [t0, t1] of visiblePieces(iv)) {
+      const p = S({ x: a.x + (b.x - a.x) * t0, y: a.y + (b.y - a.y) * t0 }, v), q = S({ x: a.x + (b.x - a.x) * t1, y: a.y + (b.y - a.y) * t1 }, v);
+      d += `M${f1(p.x)} ${f1(p.y)}L${f1(q.x)} ${f1(q.y)}`;
+    }
+  }
+  return d;
+}
+
+// Fração oculta da parede i ORIGINAL (para esconder também a cota da divisa).
+function hiddenOfSeg(shape, i, hidden) {
+  const ex = expandFillets(shape);
+  const j = ex === shape ? i : ex.map[i];
+  return hiddenFraction(hidden.get(shape.id + ':' + j));
+}
+
 export function shapePath(shape, v) {
   shape = expandFillets(shape);
   const m = segmentCount(shape);
@@ -120,6 +147,7 @@ function dims(content, shape, v, report, opts) {
     const seg = shape.segments[i];
     const info = segInfo(shape, i);
     const live = opts.live?.shapeId === shape.id && opts.live.segs.includes(i);
+    if (!live && opts.hidden && hiddenOfSeg(shape, i, opts.hidden) > 0.95) continue; // cota da divisa oculta
     const a = S(info.p0, v), b = S(info.p1, v);
     const dd = sub(b, a);
     const L = Math.hypot(dd.x, dd.y);
@@ -238,8 +266,12 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
   const st = stats(content);
   let o = '';
   const selShape = ui.sel && ui.sel.shapeId;
+  // Divisas coincidentes entre áreas: não desenha (as duas áreas parecem um contorno só).
+  // A área selecionada mostra o contorno inteiro, para você ver o que é dela.
+  const hidden = sharedEdges(content, Math.max(1e-3, 1.5 / v.k));
+  const noHide = new Map();
   for (const s of content.shapes) {
-    const d = shapePath(s, v);
+    const d = s.id === selShape && !opts.export ? shapePath(s, v) : outlinePath(s, v, hidden);
     if (!d) continue;
     const isSel = s.id === selShape && !opts.export;
     const report = ui.reports?.[s.id];
@@ -270,7 +302,7 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
   }
   o += objectsOverlay(content, v, ui, opts);
   const dopts = { ...opts, live: ui.live };
-  for (const s of content.shapes) o += dims(content, s, v, ui.reports?.[s.id], dopts);
+  for (const s of content.shapes) o += dims(content, s, v, ui.reports?.[s.id], { ...dopts, hidden: s.id === selShape && !opts.export ? noHide : hidden });
   for (const s of content.shapes) o += areaLabel(content, s, v, st, opts);
   o += texts(content, v, ui, opts);
 
@@ -354,6 +386,10 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
     for (const g of ui.guides || []) {
       const a = S(g[0], v), b = S(g[1], v);
       o += `<path d="M${f1(a.x)} ${f1(a.y)}L${f1(b.x)} ${f1(b.y)}" stroke="${C.guide}" stroke-width="1.2" stroke-dasharray="3 4"/>`;
+    }
+    if (ui.snapEdge) {
+      const a = S(ui.snapEdge[0], v), b = S(ui.snapEdge[1], v);
+      o += `<path d="M${f1(a.x)} ${f1(a.y)}L${f1(b.x)} ${f1(b.y)}" stroke="${C.guide}" stroke-width="7" stroke-linecap="round" opacity=".35"/>`;
     }
     if (ui.snapRing) {
       const q = S(ui.snapRing, v);

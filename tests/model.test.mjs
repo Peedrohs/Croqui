@@ -101,3 +101,22 @@ const rect = () => { const s = newShape({ x: 0, y: 0 }); s.vertices = [[0, 0], [
   }
   console.log('ok fillet');
 }
+
+// ---- Áreas encostadas: divisa oculta + encaixe magnético ----
+{ const { sharedEdges, edgeSnap, applyRigid, hiddenFraction } = await import('../js/areas.js');
+  const R = (x0, y0, x1, y1) => { const s = rect(); s.vertices = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => ({ x, y })); return s; };
+  const c = newContent('m'); const a = R(0, 0, 10, 8), b = R(10, 2, 14, 5); c.shapes.push(a, b);
+  const h = sharedEdges(c, 1e-3);
+  near(hiddenFraction(h.get(b.id + ':3')), 1, 1e-9);            // lado esquerdo da calçada: todo oculto
+  near(hiddenFraction(h.get(a.id + ':1')), 3 / 8, 1e-9);         // parede do pátio: só o trecho encostado
+  assert.equal(stats(c).per[a.id].area, 80); assert.equal(stats(c).per[b.id].area, 12); // continuam independentes
+  // arrastada torta e afastada 0.2: encaixa, fica paralela e coincidente
+  const d = R(10.2, 2, 14.2, 5); const ang = 3 * Math.PI / 180, cx = 12.2, cy = 3.5;
+  d.vertices.forEach((v) => { const x = v.x - cx, y = v.y - cy; v.x = cx + x * Math.cos(ang) - y * Math.sin(ang); v.y = cy + x * Math.sin(ang) + y * Math.cos(ang); });
+  const c2 = newContent('m'); c2.shapes.push(a, d);
+  const r = edgeSnap(c2, d, 0.4); assert.ok(r);
+  applyRigid(d.vertices, d.vertices.map((v) => ({ ...v })), r);
+  near(d.vertices[0].x, 10, 1e-9); near(d.vertices[3].x, 10, 1e-9);
+  { const c3 = newContent("m"); const far = R(11, 2, 15, 5); c3.shapes.push(a, far); assert.equal(edgeSnap(c3, far, 0.4), null); } // longe: solta
+  console.log('ok áreas encostadas');
+}

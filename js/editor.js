@@ -14,6 +14,7 @@ import { OBJECT_TYPES, newObject, objectAt, objectType, objectPreviewSVG } from 
 import { showContextMenu, hideContextMenu } from './ctxmenu.js';
 import { labelPoint, norm, distToSegment } from './geometry.js';
 import { lengthTolerance } from './solver.js';
+import { edgeSnap, applyRigid, wallSnapOffset, pointOnEdgeSnap } from './areas.js';
 import { buildFills, buildGrid, buildOverlay, buildThumb, buildImages } from './render.js';
 import { TEXTURES, PAVER_PATTERNS, PAVER_COLORS, DECK_COLORS, previewSVG, defaultFill, textureName } from './textures.js';
 import { exportPNG, exportPDF, safeName } from './export.js';
@@ -263,7 +264,7 @@ export class Editor {
     this.gFills.setAttribute('transform', M);
     this.gOverlay.innerHTML = this.imageOverlay() + buildOverlay(this.content, v, {
       sel: this.sel, tool: this.tool, reports: this.reports, drawing: this.drawing ? { ...this.drawing, arc: this.arcMode } : null,
-      freehand: this.freehand, loose: this.loose, guides: this.snap?.guides, snapRing: this.snap?.ring, live: this.live,
+      freehand: this.freehand, loose: this.loose, guides: this.snap?.guides, snapRing: this.snap?.ring, snapEdge: this.snap?.edge, live: this.live,
     }, { palette: P, dimPx: this.settings.dimPx, showArea: this.settings.showArea, netArea: this.settings.netArea });
     const dark = P.name === 'dark';
     if (this.markupDirty) { this.gMarkup.innerHTML = markupSVG(this.content.markup, { dark }); this.markupDirty = false; }
@@ -771,6 +772,10 @@ export class Editor {
       if (d < bd) { bd = d; best = { shapeId: o.id, i, v }; }
     });
     if (best) return { ...res, w: { x: best.v.x, y: best.v.y }, target: { shapeId: best.shapeId, i: best.i }, ring: best.v, kind: 'vertex' };
+    // 1b) encostar na parede de OUTRA forma (áreas encaixadas lado a lado)
+    const own = new Set([...(opts.exclude || [])].map((k) => k.split(':')[0]));
+    const oe = pointOnEdgeSnap(this.content, w, R * 0.8, (o) => own.has(o.id));
+    if (oe) return { ...res, w: oe.q, ring: oe.q, kind: 'edge', edge: oe.edge, target: null, guides: [] };
     let p = { ...w };
     // 2) ângulo em relação ao ponto anterior (0/45/90 e perpendicular à parede anterior)
     let dir = null;
@@ -830,7 +835,7 @@ export class Editor {
 
   // Háptico só ao ENTRAR num encaixe (não a cada movimento).
   feelSnap(r) {
-    const key = r.target ? r.target.shapeId + ':' + r.target.i : r.close ? 'close' : r.guides.length ? 'g' + r.kind : '';
+    const key = r.target ? r.target.shapeId + ':' + r.target.i : r.close ? 'close' : r.edge ? 'e' + r.edge[0].x + ',' + r.edge[0].y : r.guides.length ? 'g' + r.kind : '';
     if (key && key !== this.lastSnapKey) haptic();
     this.lastSnapKey = key;
   }
@@ -842,14 +847,14 @@ export class Editor {
     const exclude = new Set(s ? [s.id + ':' + (n - 1)] : []);
     const r = this.snapWorld(w, { exclude, from: s?.vertices[n - 1], prev: n >= 2 ? s.vertices[n - 2] : null, allowClose: s });
     this.feelSnap(r);
-    return { w: r.w, snap: !!(r.target || r.guides.length || r.kind), closeHint: r.close, guide: null, target: r.target, guides: r.guides, ring: r.ring };
+    return { w: r.w, snap: !!(r.target || r.guides.length || r.kind), closeHint: r.close, guide: null, target: r.target, guides: r.guides, ring: r.ring, edge: r.edge };
   }
 
   updatePlace(p) {
     if (!this.drawing) this.drawing = { shapeId: null };
     const r = this.snapPoint(p);
     Object.assign(this.drawing, { preview: r.w, snap: r.snap, closeHint: r.closeHint, guide: null, target: r.target });
-    this.snap = { guides: r.guides, ring: r.ring };
+    this.snap = { guides: r.guides, ring: r.ring, edge: r.edge };
     this.render();
   }
 
@@ -1172,14 +1177,24 @@ export class Editor {
         else if (t?.kind === 'textresize') g.type = 'resizeText';
         else if (t?.kind === 'imgresize') g.type = 'resizeImage';
         else if (t?.kind === 'image' && this.sel?.kind === 'image' && this.sel.id === t.textId) { g.type = 'dragImage'; g.w0 = this.toWorld(g.last); }
-        else if ((t?.kind === 'shape' || t?.kind === 'dim') && t.shapeId === selShape) { g.type = 'dragShape'; g.w0 = this.toWorld(g.last); }
+        else if ((t?.kind === 'shape' || t?.kind === 'dim') && t.shapeId === selShape) {
+          g.type = 'dragShape'; g.w0 = this.toWorld(g.start);
+          g.orig = findShape(this.content, t.shapeId).vertices.map((v) => ({ x: v.x, y: v.y }));
+        }
         else { g.type = 'pan'; g.moved = true; }
         this.onMove(e);
         return;
       }
       case 'dragWall': {
         const s = findShape(this.content, g.target.shapeId), n = s.vertices.length;
-        const off = dot(sub(w, g.w0), g.nrm);
+        let off = dot(sub(w, g.w0), g.nrm);
+        // Encaixa na linha de uma parede paralela de outra área.
+        const moved = g.orig.map((p) => add(p, mul(g.nrm, off)));
+        const ws = this.settings.snap === false ? null : wallSnapOffset(this.content, s, moved[0], moved[1], g.nrm, (this.settings.snapPx || 15) / this.view.k);
+        if (ws) off += ws.off;
+        this.snap = ws ? { guides: [], ring: null, edge: ws.edge } : null;
+        if (ws && ws.key !== g.snapKey) haptic();
+        g.snapKey = ws?.key || '';
         [s.vertices[g.target.i], s.vertices[(g.target.i + 1) % n]].forEach((v, k2) => { v.x = g.orig[k2].x + g.nrm.x * off; v.y = g.orig[k2].y + g.nrm.y * off; });
         this.fillsDirty = true;
         this.render();
@@ -1189,7 +1204,7 @@ export class Editor {
         const o = this.content.objects.find((x) => x.id === g.target.textId);
         const r = this.snapObject(o, add(w, g.off));
         o.x = r.x; o.y = r.y; if (r.rot != null) o.rot = r.rot;
-        this.snap = { guides: r.guides, ring: r.ring };
+        this.snap = { guides: r.guides, ring: r.ring, edge: r.edge };
         this.fillsDirty = true;
         this.render();
         break;
@@ -1212,7 +1227,7 @@ export class Editor {
         const r = this.snapWorld(w, { exclude: ex });
         this.feelSnap(r);
         g.snapTarget = r.target;
-        this.snap = { guides: r.guides, ring: r.ring };
+        this.snap = { guides: r.guides, ring: r.ring, edge: r.edge };
         v.x = r.w.x; v.y = r.w.y;
         void n;
         this.fillsDirty = true;
@@ -1248,9 +1263,18 @@ export class Editor {
         break;
       }
       case 'dragShape': {
+        // Move a partir da posição original (assim o encaixe solta sozinho quando você afasta).
         const s = findShape(this.content, g.target.shapeId);
-        moveShape(s, sub(w, g.w0));
-        g.w0 = w;
+        const dlt = sub(w, g.w0);
+        g.orig.forEach((p, i) => { s.vertices[i].x = p.x + dlt.x; s.vertices[i].y = p.y + dlt.y; });
+        const r = this.settings.snap === false ? null : edgeSnap(this.content, s, (this.settings.snapPx || 15) / this.view.k);
+        if (r) {
+          applyRigid(s.vertices, s.vertices.map((v) => ({ x: v.x, y: v.y })), r);
+          this.snap = { guides: [], ring: null, edge: r.edge };
+        } else this.snap = null;
+        const key = r ? r.key + (r.corner ? 'c' : '') : '';
+        if (key && key !== g.snapKey) haptic();
+        g.snapKey = key;
         this.fillsDirty = true;
         this.render();
         break;
@@ -1310,6 +1334,7 @@ export class Editor {
       case 'dragVertex': this.dropVertex(g); break;
       case 'dragWall': {
         this.live = null;
+        this.snap = null;
         const s = findShape(this.content, g.target.shapeId);
         if (hasMeasures(s)) this.solve(s);
         this.commit(); this.updateInspector();
@@ -1323,7 +1348,8 @@ export class Editor {
         break;
       }
       case 'dragObj': case 'rotObj': this.snap = null; this.commit(); this.updateInspector(); break;
-      case 'dragShape': case 'dragText': case 'resizeText': this.commit(); break;
+      case 'dragShape': this.snap = null; this.commit(); break;
+      case 'dragText': case 'resizeText': this.commit(); break;
     }
   }
 
