@@ -44,6 +44,10 @@ const ICON = {
   redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/>',
   share: '<path d="M12 3v12M7.5 7.5L12 3l4.5 4.5"/><path d="M6 11H5v9h14v-9h-1"/>',
   more: '<circle cx="5.5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18.5" cy="12" r="1.4"/>',
+  // Botão olho das cotas: cheio (visíveis) / com traço (esmaecidas) / pontilhado (ocultas).
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3" fill="currentColor"/>',
+  eyeDim: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 20L20 4"/>',
+  eyeOff: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" stroke-dasharray="1.6 2.6"/><circle cx="12" cy="12" r="3" stroke-dasharray="1.6 2.4"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
   chevron: '<path d="M7 10l5 5 5-5"/>',
 };
@@ -117,7 +121,7 @@ export class Editor {
     <div class="editor">
       <div class="stage">
         <svg class="canvas" xmlns="http://www.w3.org/2000/svg">
-          <g class="grid"></g><g class="images"></g><g class="fills"></g><g class="overlay"></g><g class="markup"></g><g class="markup-live"></g>
+          <g class="grid"></g><g class="images"></g><g class="fills"></g><g class="overlay"></g><g class="dims"></g><g class="overlay-top"></g><g class="markup"></g><g class="markup-live"></g>
         </svg>
         <header class="fbar">
           <div class="cap cap-left">
@@ -130,6 +134,7 @@ export class Editor {
             ${ACTIONS_CENTER.map((t) => `<button class="ib" data-a="${t.a}" aria-label="${t.label}" title="${t.label}">${icon(t.icon)}</button>`).join('')}
           </div>
           <div class="cap cap-right">
+            <button class="ib" data-a="dims" aria-label="Cotas: visíveis">${icon('eye')}</button>
             <button class="ib" data-a="undo" aria-label="Desfazer">${icon('undo')}</button>
             <button class="ib" data-a="export" aria-label="Compartilhar / exportar">${icon('share')}</button>
             <button class="ib" data-a="more" aria-label="Mais opções">${icon('more')}</button>
@@ -153,6 +158,9 @@ export class Editor {
     this.gImages = r.querySelector('g.images');
     this.gFills = r.querySelector('g.fills');
     this.gOverlay = r.querySelector('g.overlay');
+    this.gDims = r.querySelector('g.dims');
+    this.gTop = r.querySelector('g.overlay-top');
+    this.applyDimMode(true);
     this.gMarkup = r.querySelector('g.markup');
     this.gLive = r.querySelector('g.markup-live');
     this.elInspector = r.querySelector('.inspector');
@@ -262,10 +270,13 @@ export class Editor {
     this.gImages.setAttribute('transform', M);
     if (this.fillsDirty) { this.gFills.innerHTML = buildFills(this.content, P); this.fillsDirty = false; }
     this.gFills.setAttribute('transform', M);
-    this.gOverlay.innerHTML = this.imageOverlay() + buildOverlay(this.content, v, {
+    const ov = buildOverlay(this.content, v, {
       sel: this.sel, tool: this.tool, reports: this.reports, drawing: this.drawing ? { ...this.drawing, arc: this.arcMode } : null,
       freehand: this.freehand, loose: this.loose, guides: this.snap?.guides, snapRing: this.snap?.ring, snapEdge: this.snap?.edge, live: this.live,
-    }, { palette: P, dimPx: this.settings.dimPx, showArea: this.settings.showArea, netArea: this.settings.netArea });
+    }, { palette: P, dimPx: this.settings.dimPx, showArea: this.settings.showArea, netArea: this.settings.netArea, split: true });
+    this.gOverlay.innerHTML = this.imageOverlay() + ov.base;
+    this.gDims.innerHTML = ov.dims;
+    this.gTop.innerHTML = ov.top;
     const dark = P.name === 'dark';
     if (this.markupDirty) { this.gMarkup.innerHTML = markupSVG(this.content.markup, { dark }); this.markupDirty = false; }
     this.gMarkup.setAttribute('transform', M);
@@ -329,6 +340,36 @@ export class Editor {
       const a = net ? st.areaNet : st.area;
       this.elTotals.innerHTML = `Área total <b>${formatArea(a, u)}</b>${st.objArea && net ? ` líq. <span class="muted">(bruta ${formatArea(st.area, u)})</span>` : ''} · Perímetro <b>${formatLength(st.perimeter, u)}</b>`;
     }
+  }
+
+  // 6.6 — Botão olho: cotas visíveis → esmaecidas → ocultas. Só visualização (não mexe nas
+  // medidas); fica salvo por croqui. Transição suave de opacidade (mola).
+  dimMode() { return this.sketch.dimMode || 'show'; }
+
+  cycleDims() {
+    const order = ['show', 'dim', 'hide'];
+    this.sketch.dimMode = order[(order.indexOf(this.dimMode()) + 1) % 3];
+    this.applyDimMode();
+    this.saveSoon();
+    haptic('selection');
+    toast({ show: 'Cotas visíveis', dim: 'Cotas esmaecidas', hide: 'Cotas ocultas (só na tela)' }[this.dimMode()], 1200);
+  }
+
+  applyDimMode(instant = false) {
+    const m = this.dimMode();
+    const target = { show: 1, dim: 0.28, hide: 0 }[m];
+    const b = this.root.querySelector('.fbar [data-a=dims]');
+    if (b) {
+      b.innerHTML = icon({ show: 'eye', dim: 'eyeDim', hide: 'eyeOff' }[m]);
+      b.setAttribute('aria-label', 'Cotas: ' + { show: 'visíveis', dim: 'esmaecidas', hide: 'ocultas' }[m]);
+      b.classList.toggle('on', m !== 'show');
+    }
+    const g = this.gDims;
+    g.style.pointerEvents = m === 'hide' ? 'none' : '';
+    this.dimAnim?.stop();
+    const from = this.dimOpacity ?? target;
+    if (instant) { this.dimOpacity = target; g.style.opacity = target; return; }
+    this.dimAnim = spring({ from, to: target, stiffness: 300, damping: 30, onUpdate: (k) => { this.dimOpacity = k; g.style.opacity = Math.max(0, Math.min(1, k)); } });
   }
 
   updateToolbar() {
@@ -531,6 +572,7 @@ export class Editor {
       case 'back': this.save(); this.cb.onBack(); break;
       case 'undo': this.undo(); break;
       case 'redo': this.redo(); break;
+      case 'dims': this.cycleDims(); break;
       case 'unit': this.content.unit = this.content.unit === 'ft' ? 'm' : 'ft'; this.commit(); this.updateInspector(); toast(this.content.unit === 'ft' ? 'Unidade: pés e polegadas' : 'Unidade: metros'); break;
       case 'fit': this.fit(); this.render(); this.saveSoon(); break;
       case 'markupVis': {
@@ -623,6 +665,7 @@ export class Editor {
       useLogo: this.settings.exportLogo !== false,
       includeMarkup: this.settings.exportMarkup !== false,
       netArea: this.settings.netArea !== false,
+      includeDims: this.settings.exportDims !== false,
     };
     const base = safeName(this.folder.name + '-' + this.sketch.name);
     try {

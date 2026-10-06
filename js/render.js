@@ -317,8 +317,13 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
     o += rightMarks(s, v, opts.export);
   }
   o += objectsOverlay(content, v, ui, opts);
+  // Cotas numa camada própria: o botão olho esmaece/esconde só elas (opts.split).
+  const base = o;
+  o = '';
   const dopts = { ...opts, live: ui.live };
   for (const s of content.shapes) o += dims(content, s, v, ui.reports?.[s.id], { ...dopts, hidden: s.id === selShape && !opts.export ? noHide : hidden });
+  const dimsSvg = o;
+  o = '';
   for (const s of content.shapes) o += areaLabel(content, s, v, st, opts);
   o += texts(content, v, ui, opts);
 
@@ -416,11 +421,12 @@ export function buildOverlay(content, v, ui = {}, opts = {}) {
       o += `<path d="M${pts.map((p) => `${f1(p.x)} ${f1(p.y)}`).join('L')}" stroke="${C.accent}" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>`;
     }
   }
-  return o;
+  if (opts.split) return { base, dims: dimsSvg, top: o };
+  return base + (opts.noDims ? '' : dimsSvg) + o;
 }
 
 // ---------- Exportação: SVG completo e autossuficiente ----------
-export function buildExportSVG(content, { title = '', subtitle = '', project = '', date = '', logo = null, width = 2200, includeMarkup = true, netArea = true } = {}) {
+export function buildExportSVG(content, { title = '', subtitle = '', project = '', date = '', logo = null, width = 2200, includeMarkup = true, netArea = true, includeDims = true } = {}) {
   const st = stats(content);
   const pts = [];
   for (const s of content.shapes) pts.push(...polygonize(s));
@@ -478,7 +484,7 @@ export function buildExportSVG(content, { title = '', subtitle = '', project = '
     (subtitle ? `<text x="60" y="100" font-size="20" fill="#64748b">${esc(subtitle)}</text>` : '') +
     `<line x1="50" x2="${width - 50}" y1="${header - 6}" y2="${header - 6}" stroke="#e2e8f0" stroke-width="2"/>` +
     `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${buildImages(content)}${buildFills(content, CANVAS_LIGHT)}</g>` +
-    buildOverlay(content, v, {}, { export: true, netArea }) +
+    buildOverlay(content, v, {}, { export: true, netArea, noDims: !includeDims }) +
     (includeMarkup ? `<g transform="matrix(${k} 0 0 ${k} ${v.x} ${v.y})">${markupSVG(content.markup)}</g>` : '') +
     scaleBar + legend + exportFooter(width, height - footerH, footerH, { project: project || title, date, logo }) + `</svg>`;
   return { svg, width, height };

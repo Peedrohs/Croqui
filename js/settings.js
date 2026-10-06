@@ -10,7 +10,7 @@ const KEY = 'croqui-settings';
 const DEFAULTS = {
   pencilOnly: false, penSeen: false, library: false, libraryTab: 'textures', defaultUnit: 'ft',
   ftDen: 4, mDec: 2, showGrid: true, dimPx: 14, showArea: true, netArea: true,
-  snap: true, snapPx: 15, simplifyTol: 4, exportLogo: true, exportMarkup: true,
+  snap: true, snapPx: 15, simplifyTol: 4, exportLogo: true, exportMarkup: true, exportDims: true,
   pencil: { instrument: 'pen', tools: {}, pos: null, collapsed: false },
 };
 
@@ -86,22 +86,26 @@ function mainPage(s) {
 
   <div class="ios-group-title">Desenho</div>
   <div class="ios-group">
-    <label class="ios-row">${tile('magnet', '#ff3b30')}<span class="st-label">Encaixe automático</span>${sw('snap', s.snap)}</label>
-    <button class="ios-row link" data-page="snap">${tile('magnet', '#ff9f0a')}<span class="st-label">Tolerâncias</span><span class="st-val">${s.snapPx} px · ${s.simplifyTol}°</span>${chev}</button>
-    <label class="ios-row">${tile('pencil', '#636366')}<span class="st-label">Só a Apple Pencil desenha</span>${sw('pencilOnly', s.pencilOnly)}</label>
+    <label class="ios-row">${tile('pencil', '#636366')}<span class="st-label">Rejeição de palma</span>${sw('pencilOnly', s.pencilOnly)}</label>
+    <label class="ios-row">${tile('magnet', '#ff3b30')}<span class="st-label">Snap magnético (vértices, paredes, áreas)</span>${sw('snap', s.snap)}</label>
+    <div class="ios-row">${tile('magnet', '#ff9f0a')}<span class="st-label">Raio de tolerância do snap</span><span class="st-val" data-out="snapPx">${s.snapPx} px</span></div>
+    <div class="ios-row pad slider"><span class="st-a small">●</span><input type="range" min="8" max="30" step="1" value="${s.snapPx}" data-name="snapPx" aria-label="Raio de tolerância do snap"><span class="st-a big">●</span></div>
+    <button class="ios-row link" data-page="snap">${tile('simplify', '#34c759')}<span class="st-label">Simplificar contorno</span><span class="st-val">${s.simplifyTol}°</span>${chev}</button>
   </div>
-  <div class="ios-foot">Encaixe: pontos, ângulos retos, alinhamento e extensão de paredes. Rejeição de palma: com a Pencil só ela desenha e o dedo move/zoom.</div>
+  <div class="ios-foot">Rejeição de palma: só a Apple Pencil desenha; o dedo move e dá zoom. O raio vale na tela (independe do zoom) para encaixar pontos, paredes, áreas e para “Unir pontos quase juntos”.</div>
 
   <div class="ios-group-title">Exportação</div>
   <div class="ios-group">
     <label class="ios-row">${tile('logo', '#b08d57')}<span class="st-label">Logo no rodapé</span>${sw('exportLogo', s.exportLogo)}</label>
+    <label class="ios-row">${tile('ruler', '#0a84ff')}<span class="st-label">Incluir cotas na exportação</span>${sw('exportDims', s.exportDims)}</label>
     <label class="ios-row">${tile('layers', '#af52de')}<span class="st-label">Incluir anotações</span>${sw('exportMarkup', s.exportMarkup)}</label>
   </div>
+  <div class="ios-foot">O botão olho só muda a tela; a exportação segue esta opção.</div>
 
   <div class="ios-group-title">Sobre</div>
   <div class="ios-group">
     <div class="ios-row">${tile('data', '#8e8e93')}<span class="st-label">Dados</span><span class="st-val">Só neste iPad</span></div>
-    <div class="ios-row">${tile('info', '#8e8e93')}<span class="st-label">Versão</span><span class="st-val">Croqui 2 · Paving Crew</span></div>
+    <div class="ios-row">${tile('info', '#8e8e93')}<span class="st-label">Versão</span><span class="st-val">Croqui 3 · Paving Crew</span></div>
   </div>`;
 }
 
@@ -118,13 +122,7 @@ function precisionPage(s) {
 
 function snapPage(s) {
   return `
-  <div class="st-title">Tolerâncias</div>
-  <div class="ios-group-title">Encaixe de pontos</div>
-  <div class="ios-group">
-    <div class="ios-row"><span class="st-label">Raio de encaixe</span><span class="st-val" data-out="snapPx">${s.snapPx} px</span></div>
-    <div class="ios-row pad slider"><input type="range" min="8" max="30" step="1" value="${s.snapPx}" data-name="snapPx" aria-label="Raio de encaixe"></div>
-  </div>
-  <div class="ios-foot">Distância na tela (independe do zoom) para dois pontos virarem um só.</div>
+  <div class="st-title">Simplificar contorno</div>
   <div class="ios-group-title">Simplificar contorno</div>
   <div class="ios-group">
     <div class="ios-row"><span class="st-label">Ângulo máximo</span><span class="st-val" data-out="simplifyTol">${s.simplifyTol}°</span></div>
